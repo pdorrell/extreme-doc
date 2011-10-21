@@ -15,12 +15,25 @@ class RelabelNegativeCommentsFilter(Filter):
             else:
                 #print(" ttype = %s, value = %r" % (ttype, value))
                 yield ttype, value
+                
+class HtmlPageFormatter(HtmlFormatter):
+    
+    def htmlStart(self):
+        return "<!DOCTYPE html><html>\n"
+    
+    def htmlEnd(self):
+        return "</html>\n"
+    
+    def format_unencoded(self, tokensource, outfile):
+        outfile.write(self.htmlStart())
+        HtmlFormatter.format_unencoded(self, tokensource, outfile)
+        outfile.write(self.htmlEnd())
 
 def main(inputFileName):
     outputFileName = "%s.html" % inputFileName
     rubyLexer = RubyLexer()
     rubyLexer.add_filter(RelabelNegativeCommentsFilter())
-    htmlFormatter = HtmlFormatter(full = True, cssfile = "default.css", noclobber_cssfile = True)
+    htmlPageFormatter = HtmlPageFormatter()
     
     inputFile = open(inputFileName, "r")
     code = inputFile.read()
@@ -30,7 +43,7 @@ def main(inputFileName):
     
     outputFile = open(outputFileName, "w")
     
-    highlight(code, rubyLexer, htmlFormatter, outfile = outputFile)
+    highlight(code, rubyLexer, htmlPageFormatter, outfile = outputFile)
     outputFile.close()
 
 if __name__ == "__main__":

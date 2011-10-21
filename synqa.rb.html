@@ -1,0 +1,1543 @@
+<!DOCTYPE html><html>
+<div class="highlight"><pre><span class="cn">If time is not required, we won&#39;t be able to get current time to write in the content tree</span>
+<span class="nb">require</span> <span class="s1">&#39;time&#39;</span>
+<span class="cn">If net/ssh is not required, we won&#39;t be able to log in using Ruby SSH</span>
+<span class="nb">require</span> <span class="s1">&#39;net/ssh&#39;</span>
+<span class="cn">If net/scp is not required,  we won&#39;t be able to copy files using Ruby SCP</span>
+<span class="nb">require</span> <span class="s1">&#39;net/scp&#39;</span>
+<span class="cn">If fileutils is not required, we won&#39;t be able to create local directories or copy local files</span>
+<span class="nb">require</span> <span class="s1">&#39;fileutils&#39;</span>
+
+<span class="cn">If module is not defined, methods &amp; class names may conflict with top-level objects in other code</span>
+<span class="k">module</span> <span class="nn">Synqa</span>
+
+  <span class="c1"># ensure that a directory exists</span>
+  <span class="cn">If not defined, there won&#39;t be a convenient way for calling code to create a directory for putting cached content files in</span>
+  <span class="k">def</span> <span class="nf">ensureDirectoryExists</span><span class="p">(</span><span class="n">directoryName</span><span class="p">)</span>
+    <span class="cn">If we don&#39;t check that a directory exists, we&#39;ll get an error trying to create a directory that already exists</span>
+    <span class="k">if</span> <span class="no">File</span><span class="o">.</span><span class="n">exist?</span> <span class="n">directoryName</span>
+      <span class="cn">If we don&#39;t check that the existing directory is a directory, then the calling code will assume it exists, but actually it&#39;s a file (or maybe a symlink)</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="no">File</span><span class="o">.</span><span class="n">directory?</span> <span class="n">directoryName</span>
+        <span class="cn">If we don&#39;t raise this as a fatal error, then we would have to think of some way to carry on, which there isn&#39;t really</span>
+        <span class="k">raise</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">directoryName</span><span class="si">}</span><span class="s2"> is a non-directory file&quot;</span>
+      <span class="k">end</span>
+    <span class="k">else</span>
+      <span class="cn">If we don&#39;t call this, the missing directory won&#39;t get created.</span>
+      <span class="no">FileUtils</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">directoryName</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Return the enumerated lines of the command&#39;s output</span>
+  <span class="k">def</span> <span class="nf">getCommandOutput</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+    <span class="cn">If we don&#39;t output the command it won&#39;t be echoed before it&#39;s output appears</span>
+    <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">command</span><span class="o">.</span><span class="n">inspect</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+    <span class="cn">If we don&#39;t call this, the command won&#39;t run(?) and it&#39;s output won&#39;t be available</span>
+    <span class="k">return</span> <span class="no">IO</span><span class="o">.</span><span class="n">popen</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+  <span class="k">end</span>    
+    
+  <span class="c1"># Check if the last executed process exited with status 0, if not, raise an exception</span>
+  <span class="k">def</span> <span class="nf">checkProcessStatus</span><span class="p">(</span><span class="n">description</span><span class="p">)</span>
+    <span class="cn">Without this, we won&#39;t know the status of the last process</span>
+    <span class="n">processStatus</span> <span class="o">=</span> <span class="vg">$?</span>
+    <span class="cn">If we don&#39;t check for exited, then we might report an invalid or undefined status value</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">processStatus</span><span class="o">.</span><span class="n">exited?</span>
+      <span class="k">raise</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">description</span><span class="si">}</span><span class="s2">: process did not exit normally&quot;</span>
+    <span class="k">end</span>
+    <span class="cn">Without this, we won&#39;t know if the status was non-zero</span>
+    <span class="n">exitStatus</span> <span class="o">=</span> <span class="n">processStatus</span><span class="o">.</span><span class="n">exitstatus</span>
+    <span class="cn">If we don&#39;t check for zero, then we&#39;ll always raise an error, even for success</span>
+    <span class="k">if</span> <span class="n">exitStatus</span> <span class="o">!=</span> <span class="mi">0</span>
+      <span class="cn">If we don&#39;t raise the error, then an invalid exit status will seem to exit successfully</span>
+      <span class="k">raise</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">description</span><span class="si">}</span><span class="s2">: exit status = </span><span class="si">#{</span><span class="n">exitStatus</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+    
+  <span class="c1"># An object representing a file path relative to a base directory, and a hash string</span>
+  <span class="cn">Without this class, we have no way to describe a file as a relative path, relative to a base directory.</span>
+  <span class="k">class</span> <span class="nc">RelativePathWithHash</span>
+    <span class="c1"># The relative file path (e.g. c:/dir/subdir/file.txt relative to c:/dir would be subdir/file.txt)</span>
+    <span class="cn">Without this, we won&#39;t know what the relative path is</span>
+    <span class="kp">attr_reader</span> <span class="ss">:relativePath</span>
+    
+    <span class="c1"># The hash code, e.g. a1c5b67fdb3cf0df8f1d29ae90561f9ad099bada44aeb6b2574ad9e15f2a84ed</span>
+    <span class="cn">Without this, we won&#39;t have an economically sized indicator of the file&#39;s exact contents</span>
+    <span class="kp">attr_reader</span> <span class="ss">:hash</span>
+
+    <span class="cn">Without this, we won&#39;t be able to construct the object representing the file path and the hash of its contents in a single expression (also there is no other way to set the read-only attributes)</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">relativePath</span><span class="p">,</span> <span class="nb">hash</span><span class="p">)</span>
+      <span class="cn">Without this, we won&#39;t rememeber the relative path value</span>
+      <span class="vi">@relativePath</span> <span class="o">=</span> <span class="n">relativePath</span>
+      <span class="cn">Without this, we won&#39;t remember the file&#39;s cryptographic hash of its contents</span>
+      <span class="vi">@hash</span> <span class="o">=</span> <span class="nb">hash</span>
+    <span class="k">end</span>
+
+    <span class="cn">Without this, it&#39;s more work to output the description of this object</span>
+    <span class="k">def</span> <span class="nf">inspect</span>
+      <span class="cn">Without this output, we won&#39;t know what class it belongs to or what the relative path and file content hash is</span>
+      <span class="k">return</span> <span class="s2">&quot;RelativePathWithHash[</span><span class="si">#{</span><span class="n">relativePath</span><span class="si">}</span><span class="s2">, </span><span class="si">#{</span><span class="nb">hash</span><span class="si">}</span><span class="s2">]&quot;</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  <span class="c1"># A command to be executed on the remote system which calculates a hash value for</span>
+  <span class="c1"># a file (of a given length), in the format: *hexadecimal-hash* *a-fixed-number-of-characters* *file-name*</span>
+  <span class="cn">Without this base class, we won&#39;t have an organised consistent way to execute different hashing commands on the remote system and read the output of those commands</span>
+  <span class="k">class</span> <span class="nc">HashCommand</span>
+    <span class="c1"># The command - a string or array of strings e.g. &quot;sha256sum&quot; or [&quot;sha256&quot;, &quot;-r&quot;]</span>
+    <span class="cn">Without command, we won&#39;t know what command (possibly with arguments) to execute on the remote system</span>
+    <span class="kp">attr_reader</span> <span class="ss">:command</span> 
+
+    <span class="c1"># The length of the calculated hash value e.g. 64 for sha256</span>
+    <span class="cn">Without this, we won&#39;t know how many characters of hash value to read from the output line</span>
+    <span class="kp">attr_reader</span> <span class="ss">:length</span>
+    
+    <span class="c1"># The number of characters between the hash value and the file name (usually 1 or 2)</span>
+    <span class="cn">Without this, we won&#39;t know how many space characters to expect between the file name and the hash value in the output line</span>
+    <span class="kp">attr_reader</span> <span class="ss">:spacerLen</span>
+    
+    <span class="cn">Without this we won&#39;t be able to construct the hash command object in a single expression (also there is no other way to set the read-only attributes)</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">length</span><span class="p">,</span> <span class="n">spacerLen</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t remember the command to execute (on each file)</span>
+      <span class="vi">@command</span> <span class="o">=</span> <span class="n">command</span>
+      <span class="cn">Without this we won&#39;t remember how long a hash value to expect from the output line</span>
+      <span class="vi">@length</span> <span class="o">=</span> <span class="n">length</span>
+      <span class="cn">Without this we won&#39;t remember how many space characters to expect in the output line between the file name and the hash value</span>
+      <span class="vi">@spacerLen</span> <span class="o">=</span> <span class="n">spacerLen</span>
+    <span class="k">end</span>
+
+    <span class="c1"># Parse a hash line relative to a base directory, returning a RelativePathWithHash</span>
+    <span class="cn">Without this method, we won&#39;t know how to parse the line of output from the hash command applied to the file</span>
+    <span class="k">def</span> <span class="nf">parseFileHashLine</span><span class="p">(</span><span class="n">baseDir</span><span class="p">,</span> <span class="n">fileHashLine</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t get the hash line from the last &lt;length&gt; characters of the output line</span>
+      <span class="nb">hash</span> <span class="o">=</span> <span class="n">fileHashLine</span><span class="o">[</span><span class="mi">0</span><span class="o">.</span><span class="n">.</span><span class="o">.</span><span class="n">length</span><span class="o">]</span>
+      <span class="cn">Without this we won&#39;t read the full file path from the output line preceding the spacer and the hash value</span>
+      <span class="n">fullPath</span> <span class="o">=</span> <span class="n">fileHashLine</span><span class="o">[</span><span class="p">(</span><span class="n">length</span> <span class="o">+</span> <span class="n">spacerLen</span><span class="p">)</span><span class="o">.</span><span class="n">.</span><span class="o">-</span><span class="mi">1</span><span class="o">]</span>
+      <span class="cn">Without checking that the full path matches the base directory, we would fail to make this redundant check that the remote system has applied to the hash to the file we expected it to be applied to</span>
+      <span class="k">if</span> <span class="n">fullPath</span><span class="o">.</span><span class="n">start_with?</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+        <span class="cn">If we won&#39;t return this, we will fail to return the object representing the relative path &amp; hash.</span>
+        <span class="k">return</span> <span class="no">RelativePathWithHash</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">fullPath</span><span class="o">[</span><span class="n">baseDir</span><span class="o">.</span><span class="n">length</span><span class="o">.</span><span class="n">.</span><span class="o">-</span><span class="mi">1</span><span class="o">]</span><span class="p">,</span> <span class="nb">hash</span><span class="p">)</span>
+      <span class="k">else</span>
+        <span class="cn">If we don&#39;t raise this error (which hopefully won&#39;t ever happen anyway), there won&#39;t be any sensible value we can return from this method</span>
+        <span class="k">raise</span> <span class="s2">&quot;File </span><span class="si">#{</span><span class="n">fullPath</span><span class="si">}</span><span class="s2"> from hash line is not in base dir </span><span class="si">#{</span><span class="n">baseDir</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this, the default string value of the hash command object will be less indicative of what it is</span>
+    <span class="k">def</span> <span class="nf">to_s</span>
+      <span class="cn">Without this we won&#39;t see the command as a command and a list of arguments</span>
+      <span class="k">return</span> <span class="n">command</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># Hash command for sha256sum, which generates a 64 hexadecimal digit hash, and outputs two characters between</span>
+  <span class="c1"># the hash and the file name.</span>
+  <span class="cn">Without this, we can&#39;t use the sha256sum command (which is available on some systems and which outputs a 2-space spacer)</span>
+  <span class="k">class</span> <span class="nc">Sha256SumCommand</span><span class="o">&lt;</span><span class="no">HashCommand</span>
+    <span class="k">def</span> <span class="nf">initialize</span>
+      <span class="cn">Without this, command name, hash length and spacer length won&#39;t be defined</span>
+      <span class="k">super</span><span class="p">(</span><span class="o">[</span><span class="s2">&quot;sha256sum&quot;</span><span class="o">]</span><span class="p">,</span> <span class="mi">64</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># Hash command for sha256, which generates a 64 hexadecimal digit hash, and outputs one character between</span>
+  <span class="c1"># the hash and the file name, and which requires a &quot;-r&quot; argument to put the hash value first.  </span>
+  <span class="cn">Without this, we can&#39;t use the sha256 command (which is available on some systems, which requires a &#39;-r&#39; argument if the file name is to appear _before_ the hash value, and which, in that case, has a 1-space spacer)</span>
+  <span class="k">class</span> <span class="nc">Sha256Command</span><span class="o">&lt;</span><span class="no">HashCommand</span>
+    <span class="k">def</span> <span class="nf">initialize</span>
+      <span class="cn">Without this, command name, hash length and spacer length won&#39;t be defined</span>
+      <span class="k">super</span><span class="p">(</span><span class="o">[</span><span class="s2">&quot;sha256&quot;</span><span class="p">,</span> <span class="s2">&quot;-r&quot;</span><span class="o">]</span><span class="p">,</span> <span class="mi">64</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># Put &quot;/&quot; at the end of a directory name if it is not already there.</span>
+  <span class="cn">Without this method, we will constantly be testing if directory paths have &#39;/&#39; at the end and adding it if it doesn&#39;t</span>
+  <span class="k">def</span> <span class="nf">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">baseDir</span><span class="o">.</span><span class="n">end_with?</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span> <span class="p">?</span> <span class="n">baseDir</span> <span class="p">:</span> <span class="n">baseDir</span> <span class="o">+</span> <span class="s2">&quot;/&quot;</span>
+  <span class="k">end</span>
+
+  <span class="c1"># Base class for an object representing a remote system where the contents of a directory</span>
+  <span class="c1"># on the system are enumerated by one command to list all sub-directories and another command </span>
+  <span class="c1"># to list all files in the directory and their hash values.</span>
+  <span class="cn">Without this base class, all its methods would have to be included in SshContentHost, and there wouldn&#39;t be even the possibility of defining an alternative implementation of LocalContentLocation which used &#39;find&#39; on a local system to find sub-directories and files within a directory tree (but such an implementation is not included in this module)</span>
+  <span class="k">class</span> <span class="nc">DirContentHost</span>
+    
+    <span class="c1"># The HashCommand object used to calculate and parse hash values of files</span>
+    <span class="cn">Without this we wouldn&#39;t know what hash command to execute on the (presumably remove) system, or, we wouldn&#39;t hash at all, and we would need to return the actual file contents, in which case we might as well just copy all file data every time we synced the data, which would be very inefficient.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:hashCommand</span>
+    
+    <span class="c1"># Prefix required for *find* command (usually nothing, since it should be on the system path)</span>
+    <span class="kp">attr_reader</span> <span class="ss">:pathPrefix</span>
+
+    <span class="cn">Without constructor we could not create object with read-only attribute values</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">hashCommand</span><span class="p">,</span> <span class="n">pathPrefix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+      <span class="cn">Without this, would not know the how to execute and parse the result of the hash command</span>
+      <span class="vi">@hashCommand</span> <span class="o">=</span> <span class="n">hashCommand</span>
+      <span class="cn">Without this, would not know how to execute &#39;find&#39; if it&#39;s not on the path</span>
+      <span class="vi">@pathPrefix</span> <span class="o">=</span> <span class="n">pathPrefix</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Generate the *find* command which will list all the sub-directories of the base directory</span>
+    <span class="cn">Without this, wouldn&#39;t know how to execute &#39;find&#39; command to list all sub-directories of specified directory</span>
+    <span class="k">def</span> <span class="nf">findDirectoriesCommand</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without path prefix, wouldn&#39;t work if &#39;find&#39; is not on path, without baseDir, wouldn&#39;t know which directory to start, without &#39;-type d&#39; would list more than just directories, without -print, would not print out the values found (or is that the default anyway?)</span>
+      <span class="k">return</span> <span class="o">[</span><span class="s2">&quot;</span><span class="si">#{</span><span class="vi">@pathPrefix</span><span class="si">}</span><span class="s2">find&quot;</span><span class="p">,</span> <span class="n">baseDir</span><span class="p">,</span> <span class="s2">&quot;-type&quot;</span><span class="p">,</span> <span class="s2">&quot;d&quot;</span><span class="p">,</span> <span class="s2">&quot;-print&quot;</span><span class="o">]</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Return the list of sub-directories relative to the base directory</span>
+    <span class="cn">Without this method, would not be able to list the directories of a base directory, as part of getting the content tree (be it local or remote)</span>
+    <span class="k">def</span> <span class="nf">listDirectories</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">if un-normalised, code assuming &#39;/&#39; at the end might be one-off</span>
+      <span class="n">baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">without the command, we don&#39;t know what command to execute to list the directories</span>
+      <span class="n">command</span> <span class="o">=</span> <span class="n">findDirectoriesCommand</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">without this, the command won&#39;t execute, or we it might execute in a way that doesn&#39;t let us read the output</span>
+      <span class="n">output</span> <span class="o">=</span> <span class="n">getCommandOutput</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+      <span class="cn">without initial directories, we would have nowhere to accumulate the directory relative paths</span>
+      <span class="n">directories</span> <span class="o">=</span> <span class="o">[]</span>
+      <span class="cn">without the base dir length, we don&#39;t know how much to chop off the path names to get the relative path names</span>
+      <span class="n">baseDirLen</span> <span class="o">=</span> <span class="n">baseDir</span><span class="o">.</span><span class="n">length</span>
+      <span class="cn">without this, would not get feedback that we are listing directories (which might be a slow remote command)</span>
+      <span class="nb">puts</span> <span class="s2">&quot;Listing directories ...&quot;</span>
+      <span class="cn">without looping over the output, we wouldn&#39;t be reading the output of the listing command</span>
+      <span class="k">while</span> <span class="p">(</span><span class="n">line</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">gets</span><span class="p">)</span>
+        <span class="cn">without chomping, eoln would be included in the directory paths</span>
+        <span class="n">line</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">chomp</span>
+        <span class="cn">without this, would not get feedback about each directory listed</span>
+        <span class="nb">puts</span> <span class="s2">&quot; </span><span class="si">#{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="cn">without this check, unexpected invalid output not including the base directory would be processed as if nothing had gone wrong</span>
+        <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">start_with?</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+          <span class="cn">without this, the directory in this line of output wouldn&#39;t be recorded</span>
+          <span class="n">directories</span> <span class="o">&lt;&lt;</span> <span class="n">line</span><span class="o">[</span><span class="n">baseDirLen</span><span class="o">.</span><span class="n">.</span><span class="o">-</span><span class="mi">1</span><span class="o">]</span>
+        <span class="k">else</span>
+          <span class="cn">if we don&#39;t raise the error, an expected result (probably a sign of some important error) would be ignored</span>
+          <span class="k">raise</span> <span class="s2">&quot;Directory </span><span class="si">#{</span><span class="n">line</span><span class="si">}</span><span class="s2"> is not a sub-directory of base directory </span><span class="si">#{</span><span class="n">baseDir</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="cn">if we don&#39;t close the output, then un-opened output stream objects will accumulate (and leak resources)</span>
+      <span class="n">output</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+      <span class="cn">if we don&#39;t check the process status, then a failed command will be treated as if it had succeeded (i.e. as if there were no directories found)</span>
+      <span class="n">checkProcessStatus</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+      <span class="k">return</span> <span class="n">directories</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Generate the *find* command which will list all the files within the base directory</span>
+    <span class="cn">without this method, we wouldn&#39;t know what command to use to list all the files in the base directory</span>
+    <span class="k">def</span> <span class="nf">findFilesCommand</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without path prefix, wouldn&#39;t work if &#39;find&#39; is not on path, without baseDir, wouldn&#39;t know which directory to start, without &#39;-type f&#39; would list more than just directories, without -print, would not print out the values found (or is that the default anyway?)</span>
+      <span class="k">return</span> <span class="o">[</span><span class="s2">&quot;</span><span class="si">#{</span><span class="vi">@pathPrefix</span><span class="si">}</span><span class="s2">find&quot;</span><span class="p">,</span> <span class="n">baseDir</span><span class="p">,</span> <span class="s2">&quot;-type&quot;</span><span class="p">,</span> <span class="s2">&quot;f&quot;</span><span class="p">,</span> <span class="s2">&quot;-print&quot;</span><span class="o">]</span>
+    <span class="k">end</span>
+
+    <span class="c1"># List file hashes by executing the command to hash each file on the output of the</span>
+    <span class="c1"># *find* command which lists all files, and parse the output.</span>
+    <span class="cn">Without this, would not be able to list all the files in the base directory and the hashes of their contents (as part of getting the content tree)</span>
+    <span class="k">def</span> <span class="nf">listFileHashes</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Un-normalised, an off-by-one error would occur when &#39;subtracting&#39; the base dir off the full paths to get relative paths</span>
+      <span class="n">baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, we would have nowhere to accumulate the file hash objects</span>
+      <span class="n">fileHashes</span> <span class="o">=</span> <span class="o">[]</span>
+      <span class="cn">Without this, we would not be executing and parsing the results of the file-listing command</span>
+      <span class="n">listFileHashLines</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span> <span class="k">do</span> <span class="o">|</span><span class="n">fileHashLine</span><span class="o">|</span>
+        <span class="cn">Without this, we would not be parsing the result line containing this file and its hash value</span>
+        <span class="n">fileHash</span> <span class="o">=</span> <span class="nb">self</span><span class="o">.</span><span class="n">hashCommand</span><span class="o">.</span><span class="n">parseFileHashLine</span><span class="p">(</span><span class="n">baseDir</span><span class="p">,</span> <span class="n">fileHashLine</span><span class="p">)</span>
+        <span class="cn">Without this check we would be accumulating spurious nil values returned from listFileHashLines (even though listFileHashLines doesn&#39;t actually do that)</span>
+        <span class="k">if</span> <span class="n">fileHash</span> <span class="o">!=</span> <span class="kp">nil</span>
+          <span class="cn">Without this, we would fail to include this file &amp; hash in the list of file hashes.</span>
+          <span class="n">fileHashes</span> <span class="o">&lt;&lt;</span> <span class="n">fileHash</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="n">fileHashes</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Construct the ContentTree for the given base directory</span>
+    <span class="cn">Without this, wouldn&#39;t know how to construct a content tree from a list of relative directory paths and relative file paths with associated hash values</span>
+    <span class="k">def</span> <span class="nf">getContentTree</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, wouldn&#39;t have an empty content tree that we could start filling with dir &amp; file data</span>
+      <span class="n">contentTree</span> <span class="o">=</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">new</span><span class="p">()</span>
+      <span class="cn">Without this, wouldn&#39;t record the time of the content tree, and wouldn&#39;t be able to determine from a file&#39;s modification time that it had been changed since that content tree was recorded.</span>
+      <span class="n">contentTree</span><span class="o">.</span><span class="n">time</span> <span class="o">=</span> <span class="no">Time</span><span class="o">.</span><span class="n">now</span><span class="o">.</span><span class="n">utc</span>
+      <span class="cn">Without this, the listed directories won&#39;t get included in the content tree</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">listDirectories</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+        <span class="cn">Without this, this directory won&#39;t get included in the content tree</span>
+        <span class="n">contentTree</span><span class="o">.</span><span class="n">addDir</span><span class="p">(</span><span class="n">dir</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, the listed files and hashes won&#39;t get included in the content tree</span>
+      <span class="k">for</span> <span class="n">fileHash</span> <span class="k">in</span> <span class="n">listFileHashes</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+        <span class="cn">Without this, this file &amp; hash won&#39;t get included in the content tree</span>
+        <span class="n">contentTree</span><span class="o">.</span><span class="n">addFile</span><span class="p">(</span><span class="n">fileHash</span><span class="o">.</span><span class="n">relativePath</span><span class="p">,</span> <span class="n">fileHash</span><span class="o">.</span><span class="n">hash</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="n">contentTree</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># Execute a (local) command, or, if dryRun, just pretend to execute it.</span>
+  <span class="c1"># Raise an exception if the process exit status is not 0.</span>
+  <span class="cn">Without this method, wouldn&#39;t have an easy way to execute a command, echoing the command before it&#39;s executed, and optionally only doing a &#39;dry run&#39;, i.e. not running the command at all.</span>
+  <span class="k">def</span> <span class="nf">executeCommand</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="cn">Without this, the command won&#39;t be echoed</span>
+    <span class="nb">puts</span> <span class="s2">&quot;EXECUTE: </span><span class="si">#{</span><span class="n">command</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="cn">Without this check, the command will be executed even if it is meant to be a dry run</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+      <span class="cn">Without this, the command won&#39;t actualy be execute even when it is meant to be run</span>
+      <span class="nb">system</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+      <span class="cn">Without this check, a failed command will be treated as if it had executed successfully</span>
+      <span class="n">checkProcessStatus</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># Base SSH/SCP implementation</span>
+  <span class="cn">Without this base class, we wouldn&#39;t be able to share code between the internal (i.e. Ruby library) and external (i.e. separate executables) implementations of SSH &amp; SCP.</span>
+  <span class="k">class</span> <span class="nc">BaseSshScp</span>
+    <span class="cn">Without these, we wouldn&#39;t know the username, host name or standard format combination of the two</span>
+    <span class="kp">attr_reader</span> <span class="ss">:userAtHost</span><span class="p">,</span> <span class="ss">:user</span><span class="p">,</span> <span class="ss">:host</span>
+    
+    <span class="cn">Without this method we wouldn&#39;t have a convenient way to set username &amp; host from a single user@host value.</span>
+    <span class="k">def</span> <span class="nf">setUserAtHost</span><span class="p">(</span><span class="n">userAtHost</span><span class="p">)</span>
+      <span class="vi">@userAtHost</span> <span class="o">=</span> <span class="n">userAtHost</span>
+      <span class="vi">@user</span><span class="p">,</span> <span class="vi">@host</span> <span class="o">=</span> <span class="vi">@userAtHost</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;@&quot;</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without a base close method, implementations that don&#39;t need anything closed will fail when &#39;close&#39; is called on them.</span>
+    <span class="k">def</span> <span class="nf">close</span>
+      <span class="c1"># by default do nothing - close any cached connections</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># delete remote directory (if dryRun is false) using &quot;rm -r&quot;</span>
+    <span class="cn">Without this method, there won&#39;t be any way to delete a directory and it&#39;s contents on a remote system</span>
+    <span class="k">def</span> <span class="nf">deleteDirectory</span><span class="p">(</span><span class="n">dirPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the required ssh command to recursive remove a directory won&#39;t be (optionally) executed. Without the &#39;-r&#39;, the attempt to delete the directory won&#39;t be successful.</span>
+      <span class="n">ssh</span><span class="p">(</span><span class="s2">&quot;rm -r </span><span class="si">#{</span><span class="n">dirPath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="c1"># delete remote file (if dryRun is false) using &quot;rm&quot;</span>
+    <span class="cn">Without this method, there won&#39;t be any way to delete a file from the remote system</span>
+    <span class="k">def</span> <span class="nf">deleteFile</span><span class="p">(</span><span class="n">filePath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the required ssh command to delete a file won&#39;t be (optionally) executed.</span>
+      <span class="n">ssh</span><span class="p">(</span><span class="s2">&quot;rm </span><span class="si">#{</span><span class="n">filePath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># SSH/SCP using Ruby Net::SSH &amp; Net::SCP</span>
+  <span class="cn">Without this class, we could not run SSH and SCP commands (required for file synching) via the internal Ruby library, i.e. Net::SSH).</span>
+  <span class="k">class</span> <span class="nc">InternalSshScp</span><span class="o">&lt;</span><span class="no">BaseSshScp</span>
+    
+    <span class="cn">Without an initialiser, we could not prepare a variable to hold a cached SSH connection</span>
+    <span class="k">def</span> <span class="nf">initialize</span>
+      <span class="vi">@connection</span> <span class="o">=</span> <span class="kp">nil</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this method, we can&#39;t get a cached SSH connection (opening a new one if necessary)</span>
+    <span class="k">def</span> <span class="nf">connection</span>
+      <span class="cn">Without this check, we would get a new connection even though we already have a new one</span>
+      <span class="k">if</span> <span class="vi">@connection</span> <span class="o">==</span> <span class="kp">nil</span>
+        <span class="cn">Without this, we don&#39;t get feedback about an SSH connection being opened</span>
+        <span class="nb">puts</span> <span class="s2">&quot;Opening SSH connection to </span><span class="si">#{</span><span class="n">user</span><span class="si">}</span><span class="s2">@</span><span class="si">#{</span><span class="n">host</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+        <span class="cn">Without this, we won&#39;t actually connect to the SSH host</span>
+        <span class="vi">@connection</span> <span class="o">=</span> <span class="no">Net</span><span class="o">::</span><span class="no">SSH</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">user</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="vi">@connection</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this method, we can&#39;t get a connection for doing SCP commands (i.e. copying files or directories from local to remote system)</span>
+    <span class="k">def</span> <span class="nf">scpConnection</span>
+      <span class="k">return</span> <span class="n">connection</span><span class="o">.</span><span class="n">scp</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this we can&#39;t close the connection when we have finished with it (so it might &quot;leak&quot;)</span>
+    <span class="k">def</span> <span class="nf">close</span><span class="p">()</span>
+      <span class="cn">Without this check, we&#39;ll be trying to close the connection even if there isn&#39;t one, or it was already closed</span>
+      <span class="k">if</span> <span class="vi">@connection</span> <span class="o">!=</span> <span class="kp">nil</span>
+        <span class="cn">Without this we won&#39;t get feedback about the SSH connection being closed</span>
+        <span class="nb">puts</span> <span class="s2">&quot;Closing SSH connection to </span><span class="si">#{</span><span class="n">user</span><span class="si">}</span><span class="s2">@</span><span class="si">#{</span><span class="n">host</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+        <span class="cn">Without this the connection won&#39;t actually get closed</span>
+        <span class="vi">@connection</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="cn">Without this we won&#39;t know the connection has been closed, because a nil @connection represents &quot;no open connection&quot;</span>
+        <span class="vi">@connection</span> <span class="o">=</span> <span class="kp">nil</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># execute command on remote host (if dryRun is false), yielding lines of output</span>
+    <span class="cn">Without this method, we can&#39;t execute SSH commands on the remote host, echoing the command first, and optionally executing the command (or optionally not executing it and just doing a &quot;dry run&quot;)</span>
+    <span class="k">def</span> <span class="nf">ssh</span><span class="p">(</span><span class="n">commandString</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t have a description to display (although the value is only used in the next statement)</span>
+      <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;SSH </span><span class="si">#{</span><span class="n">user</span><span class="si">}</span><span class="s2">@</span><span class="si">#{</span><span class="n">host</span><span class="si">}</span><span class="s2">: executing </span><span class="si">#{</span><span class="n">commandString</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="cn">Without this the command description won&#39;t be echoed</span>
+      <span class="nb">puts</span> <span class="n">description</span>
+      <span class="cn">Without this check, the command will execute even when it&#39;s only meant to be a dry run</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+        <span class="cn">Without this, the command won&#39;t execute, and we won&#39;t have the output of the command</span>
+        <span class="n">outputText</span> <span class="o">=</span> <span class="n">connection</span><span class="o">.</span><span class="n">exec!</span><span class="p">(</span><span class="n">commandString</span><span class="p">)</span>
+        <span class="cn">Without this check, there might be a nil exception, because the result of exec! can be nil(?)</span>
+        <span class="k">if</span> <span class="n">outputText</span> <span class="o">!=</span> <span class="kp">nil</span> <span class="k">then</span>
+          <span class="cn">Without this, the output text won&#39;t be broken into lines</span>
+          <span class="k">for</span> <span class="n">line</span> <span class="k">in</span> <span class="n">outputText</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">do</span>
+            <span class="cn">Without this, the code iterating over the output of ssh won&#39;t receive the lines of output</span>
+            <span class="k">yield</span> <span class="n">line</span>
+          <span class="k">end</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+
+    <span class="c1"># copy a local directory to a remote directory (if dryRun is false)</span>
+    <span class="cn">Without this method there won&#39;t be an easy way to copy a local directory to a remote directory (optionally doing only a dry run)</span>
+    <span class="k">def</span> <span class="nf">copyLocalToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this there won&#39;t be a description of the copy operation that can be displayed to the user as feedback</span>
+      <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;SCP: copy directory </span><span class="si">#{</span><span class="n">sourcePath</span><span class="si">}</span><span class="s2"> to </span><span class="si">#{</span><span class="n">user</span><span class="si">}</span><span class="s2">@</span><span class="si">#{</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">#{</span><span class="n">destinationPath</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="cn">Without this the user won&#39;t see the echoed description</span>
+      <span class="nb">puts</span> <span class="n">description</span>
+      <span class="cn">Without this check, the files will be copied even if it is only meant to be a dry run.</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+        <span class="cn">Without this, the files won&#39;t actually be copied.</span>
+        <span class="n">scpConnection</span><span class="o">.</span><span class="n">upload!</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="ss">:recursive</span> <span class="o">=&gt;</span> <span class="kp">true</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># copy a local file to a remote directory (if dryRun is false)</span>
+    <span class="cn">Without this method there won&#39;t be an easy way to copy a single local file to a remove directory (optionally doing only a dry run)</span>
+    <span class="k">def</span> <span class="nf">copyLocalFileToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this there won&#39;t be a description of the copy operation that can be displayed to the user as feedback</span>
+      <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;SCP: copy file </span><span class="si">#{</span><span class="n">sourcePath</span><span class="si">}</span><span class="s2"> to </span><span class="si">#{</span><span class="n">user</span><span class="si">}</span><span class="s2">@</span><span class="si">#{</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">#{</span><span class="n">destinationPath</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="cn">Without this the user won&#39;t see the echoed description</span>
+      <span class="nb">puts</span> <span class="n">description</span>
+      <span class="cn">Without this check, the file will be copied even if it is only meant to be a dry run.</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+        <span class="cn">Without this, the file won&#39;t actually be copied.</span>
+        <span class="n">scpConnection</span><span class="o">.</span><span class="n">upload!</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+
+  <span class="k">end</span>
+  
+  <span class="c1"># SSH/SCP using external commands, such as &quot;plink&quot; and &quot;pscp&quot;</span>
+  <span class="cn">Without this class, there would be no way to do SSH/SCP operations using external applications (and we would have to use Net::SSH, which is perfectly OK anyway)</span>
+  <span class="k">class</span> <span class="nc">ExternalSshScp</span><span class="o">&lt;</span><span class="no">BaseSshScp</span>
+    <span class="c1"># The SSH client, e.g. [&quot;ssh&quot;] or [&quot;plink&quot;,&quot;-pw&quot;,&quot;mysecretpassword&quot;] (i.e. command + args as an array)</span>
+    <span class="cn">With this, we won&#39;t know how to execute the SSH client</span>
+    <span class="kp">attr_reader</span> <span class="ss">:shell</span>
+    
+    <span class="c1"># The SCP client, e.g. [&quot;scp&quot;] or [&quot;pscp&quot;,&quot;-pw&quot;,&quot;mysecretpassword&quot;] (i.e. command + args as an array)</span>
+    <span class="cn">Without this, we won&#39;t which executable (and necessary arguments) to run for SCP commands</span>
+    <span class="kp">attr_reader</span> <span class="ss">:scpProgram</span>
+
+    <span class="c1"># The SCP command as a string</span>
+    <span class="cn">Without this, we won&#39;t be able to pass the SCP command as a single string argument to the method executeCommand</span>
+    <span class="kp">attr_reader</span> <span class="ss">:scpCommandString</span>
+
+    <span class="cn">Without initialize, we won&#39;t be able to construct an SSH/SCP object initialised with read-only attributes representing the SSH shell application and the SCP application.</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">shell</span><span class="p">,</span> <span class="n">scpProgram</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t have the remote shell command as an array of executable + arguments</span>
+      <span class="vi">@shell</span> <span class="o">=</span> <span class="n">shell</span><span class="o">.</span><span class="n">is_a?</span><span class="p">(</span><span class="nb">String</span><span class="p">)</span> <span class="p">?</span> <span class="o">[</span><span class="n">shell</span><span class="o">]</span> <span class="p">:</span> <span class="n">shell</span>
+      <span class="cn">Without this we won&#39;t have the SCP command as an array of executable + arguments</span>
+      <span class="vi">@scpProgram</span> <span class="o">=</span> <span class="n">scpProgram</span><span class="o">.</span><span class="n">is_a?</span><span class="p">(</span><span class="nb">String</span><span class="p">)</span> <span class="p">?</span> <span class="o">[</span><span class="n">scpProgram</span><span class="o">]</span> <span class="p">:</span> <span class="n">scpProgram</span>
+      <span class="cn">Without this we won&#39;t have the SCP command as single string of white-space separated executable + arguments</span>
+      <span class="vi">@scpCommandString</span> <span class="o">=</span> <span class="vi">@scpProgram</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># execute command on remote host (if dryRun is false), yielding lines of output</span>
+    <span class="cn">Without this, won&#39;t be able to execute ssh commands using an external ssh application</span>
+    <span class="k">def</span> <span class="nf">ssh</span><span class="p">(</span><span class="n">commandString</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, command being executed won&#39;t be echoed to output</span>
+      <span class="nb">puts</span> <span class="s2">&quot;SSH </span><span class="si">#{</span><span class="n">userAtHost</span><span class="si">}</span><span class="s2"> (</span><span class="si">#{</span><span class="n">shell</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">)</span><span class="si">}</span><span class="s2">): executing </span><span class="si">#{</span><span class="n">commandString</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="cn">Without this check, the command will execute even it it&#39;s meant to be a dry run</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+        <span class="cn">Without this, the command won&#39;t actually execute and return lines of output</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">getCommandOutput</span><span class="p">(</span><span class="n">shell</span> <span class="o">+</span> <span class="o">[</span><span class="n">userAtHost</span><span class="p">,</span> <span class="n">commandString</span><span class="o">]</span><span class="p">)</span>
+        <span class="cn">Without this loop, the lines of output won&#39;t be processed</span>
+        <span class="k">while</span> <span class="p">(</span><span class="n">line</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">gets</span><span class="p">)</span>
+          <span class="cn">Without this, the lines of output won&#39;t be passed to callers iterating over this method</span>
+          <span class="k">yield</span> <span class="n">line</span><span class="o">.</span><span class="n">chomp</span>
+        <span class="k">end</span>
+        <span class="cn">Without closing, the process handle will leak resources</span>
+        <span class="n">output</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="cn">Without a check on status, a failed execution will be treated as a success (yielding however many lines were output before an error occurred)</span>
+        <span class="n">checkProcessStatus</span><span class="p">(</span><span class="s2">&quot;SSH </span><span class="si">#{</span><span class="n">userAtHost</span><span class="si">}</span><span class="s2"> </span><span class="si">#{</span><span class="n">commandString</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># copy a local directory to a remote directory (if dryRun is false)</span>
+    <span class="cn">Without this method, a local directory cannot be copied to a remote directory using an external SCP application</span>
+    <span class="k">def</span> <span class="nf">copyLocalToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the external SCP application won&#39;t actually be run to copy the directory</span>
+      <span class="n">executeCommand</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">#{</span><span class="vi">@scpCommandString</span><span class="si">}</span><span class="s2"> -r </span><span class="si">#{</span><span class="n">sourcePath</span><span class="si">}</span><span class="s2"> </span><span class="si">#{</span><span class="n">userAtHost</span><span class="si">}</span><span class="s2">:</span><span class="si">#{</span><span class="n">destinationPath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># copy a local file to a remote directory (if dryRun is false)</span>
+    <span class="cn">Without this method, a local file cannot be copied to a remote directory using an external SCP application</span>
+    <span class="k">def</span> <span class="nf">copyLocalFileToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the external SCP application won&#39;t actually be run to copy the file</span>
+      <span class="n">executeCommand</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">#{</span><span class="vi">@scpCommandString</span><span class="si">}</span><span class="s2"> </span><span class="si">#{</span><span class="n">sourcePath</span><span class="si">}</span><span class="s2"> </span><span class="si">#{</span><span class="n">userAtHost</span><span class="si">}</span><span class="s2">:</span><span class="si">#{</span><span class="n">destinationPath</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+  <span class="k">end</span>
+  
+  <span class="c1"># Representation of a remote system accessible via SSH</span>
+  <span class="cn">Without this class, there won&#39;t be a way to represent details of a remote host that ssh&amp;scp commands can be executed against by a chosen implementation of SSH&amp;SCP</span>
+  <span class="k">class</span> <span class="nc">SshContentHost</span><span class="o">&lt;</span><span class="no">DirContentHost</span>
+    
+    <span class="c1"># The remote SSH/SCP login, e.g. SSH via &quot;username@host.example.com&quot;</span>
+    <span class="cn">Without this, we won&#39;t know how to execute SSH &amp; SCP commands</span>
+    <span class="kp">attr_reader</span> <span class="ss">:sshAndScp</span>
+    
+    <span class="cn">Without initialize, it won&#39;t be possible to construct an object representing a remote host and the means to execute SSH &amp; SCP commands and return hash values of remote file contents (with read-only attributes)</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">userAtHost</span><span class="p">,</span> <span class="n">hashCommand</span><span class="p">,</span> <span class="n">sshAndScp</span> <span class="o">=</span> <span class="kp">nil</span><span class="p">)</span>
+      <span class="cn">Without calling super, the hash command won&#39;t be configured</span>
+      <span class="k">super</span><span class="p">(</span><span class="n">hashCommand</span><span class="p">)</span>
+      <span class="cn">Without this, the SSH &amp; SCP implementation won&#39;t be configured</span>
+      <span class="vi">@sshAndScp</span> <span class="o">=</span> <span class="n">sshAndScp</span> <span class="o">!=</span> <span class="kp">nil</span> <span class="p">?</span>  <span class="n">sshAndScp</span> <span class="p">:</span> <span class="no">InternalSshScp</span><span class="o">.</span><span class="n">new</span><span class="p">()</span>
+      <span class="cn">Without this, the SSH &amp; SCP implementation won&#39;t be configured with the user/host details to connect to.</span>
+      <span class="vi">@sshAndScp</span><span class="o">.</span><span class="n">setUserAtHost</span><span class="p">(</span><span class="n">userAtHost</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this method, we cannot easily display the user@host details</span>
+    <span class="k">def</span> <span class="nf">userAtHost</span>
+      <span class="k">return</span> <span class="vi">@sshAndScp</span><span class="o">.</span><span class="n">userAtHost</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this method, we cannot easily close any cached connections in the SSH &amp; SCP implementation</span>
+    <span class="k">def</span> <span class="nf">closeConnections</span><span class="p">()</span>
+      <span class="cn">Without this, the connections won&#39;t be closed</span>
+      <span class="vi">@sshAndScp</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Return readable description of base directory on remote system</span>
+    <span class="cn">Without this, we have no easy way to display a description of a directory location on this remote host</span>
+    <span class="k">def</span> <span class="nf">locationDescriptor</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, the directory being displayed might be missing the final &#39;/&#39;</span>
+      <span class="n">baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="k">return</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">userAtHost</span><span class="si">}</span><span class="s2">:</span><span class="si">#{</span><span class="n">baseDir</span><span class="si">}</span><span class="s2"> (connect = </span><span class="si">#{</span><span class="n">shell</span><span class="si">}</span><span class="s2">/</span><span class="si">#{</span><span class="n">scpProgram</span><span class="si">}</span><span class="s2">, hashCommand = </span><span class="si">#{</span><span class="n">hashCommand</span><span class="si">}</span><span class="s2">)&quot;</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># execute an SSH command on the remote system, yielding lines of output</span>
+    <span class="c1"># (or don&#39;t actually execute, if dryRun is false)</span>
+    <span class="cn">Without this method, we won&#39;t have an easy way to execute a remote command on the host, echoing the command details first (so that we can see what command is to be executed), and possibly only doing a dry run and not actually executing the command</span>
+    <span class="k">def</span> <span class="nf">ssh</span><span class="p">(</span><span class="n">commandString</span><span class="p">,</span> <span class="n">dryRun</span> <span class="o">=</span> <span class="kp">false</span><span class="p">)</span>
+      <span class="cn">Without this, the command won&#39;t actually be executed</span>
+      <span class="n">sshAndScp</span><span class="o">.</span><span class="n">ssh</span><span class="p">(</span><span class="n">commandString</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span> <span class="k">do</span> <span class="o">|</span><span class="n">line</span><span class="o">|</span>
+        <span class="cn">Without this, this line of output won&#39;t be available to the caller</span>
+        <span class="k">yield</span> <span class="n">line</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># delete a remote directory, if dryRun is false</span>
+    <span class="cn">Without this, we won&#39;t have an easy way to delete a directory on the remote system, echoing the command used to delete the directory, and optionally only doing a dry run</span>
+    <span class="k">def</span> <span class="nf">deleteDirectory</span><span class="p">(</span><span class="n">dirPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the deletion command won&#39;t be run at all</span>
+      <span class="n">sshAndScp</span><span class="o">.</span><span class="n">deleteDirectory</span><span class="p">(</span><span class="n">dirPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># delete a remote file, if dryRun is false</span>
+    <span class="cn">Without this, we won&#39;t have an easy way to delete a file on the remote system, echoing the command used to delete the file, and optionally only doing a dry run</span>
+    <span class="k">def</span> <span class="nf">deleteFile</span><span class="p">(</span><span class="n">filePath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the deletion command won&#39;t be run at all</span>
+      <span class="n">sshAndScp</span><span class="o">.</span><span class="n">deleteFile</span><span class="p">(</span><span class="n">filePath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># copy a local directory to a remote directory, if dryRun is false</span>
+    <span class="cn">Without this, we won&#39;t have an easy way to copy a local directory to a directory in the remote system, echoing the command used to copy the directory, and optionally only doing a dry run</span>
+    <span class="k">def</span> <span class="nf">copyLocalToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the copy command won&#39;t be run at all</span>
+      <span class="n">sshAndScp</span><span class="o">.</span><span class="n">copyLocalToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># copy a local file to a remote directory, if dryRun is false</span>
+    <span class="cn">Without this, we won&#39;t have an easy way to copy a local file to a directory in the remote system, echoing the command used to copy the file, and optionally only doing a dry run</span>
+    <span class="k">def</span> <span class="nf">copyLocalFileToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the copy command won&#39;t be run at all</span>
+      <span class="n">sshAndScp</span><span class="o">.</span><span class="n">copyLocalFileToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Return a list of all subdirectories of the base directory (as paths relative to the base directory)</span>
+    <span class="cn">Without this we won&#39;t have a way to list the relative paths of all directories within a particular base directory on the remote system.</span>
+    <span class="k">def</span> <span class="nf">listDirectories</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, the base directory might be missing the final &#39;/&#39;, which might cause a one-off error when &#39;subtracting&#39; the base directory name from the absolute paths to get relative paths</span>
+      <span class="n">baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, we won&#39;t know that directories are about to be listed</span>
+      <span class="nb">puts</span> <span class="s2">&quot;Listing directories ...&quot;</span>
+      <span class="cn">Without this, we won&#39;t have an empty array ready to accumulate directory relative paths</span>
+      <span class="n">directories</span> <span class="o">=</span> <span class="o">[]</span>
+      <span class="cn">Without this, we won&#39;t know the length of the base directory to remove from the beginning of the absolute directory paths</span>
+      <span class="n">baseDirLen</span> <span class="o">=</span> <span class="n">baseDir</span><span class="o">.</span><span class="n">length</span>
+      <span class="cn">Without this, the directory-listing command won&#39;t be executed</span>
+      <span class="n">ssh</span><span class="p">(</span><span class="n">findDirectoriesCommand</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">))</span> <span class="k">do</span> <span class="o">|</span><span class="n">line</span><span class="o">|</span>
+        <span class="cn">Without this, we won&#39;t get feedback about which directories were found</span>
+        <span class="nb">puts</span> <span class="s2">&quot; </span><span class="si">#{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="cn">Without this check, we might ignore an error that somehow resulted in directories being listed that aren&#39;t within the specified base directory</span>
+        <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">start_with?</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+          <span class="cn">Without this, the relative path of this directory won&#39;t be added to the list</span>
+          <span class="n">directories</span> <span class="o">&lt;&lt;</span> <span class="n">line</span><span class="o">[</span><span class="n">baseDirLen</span><span class="o">.</span><span class="n">.</span><span class="o">-</span><span class="mi">1</span><span class="o">]</span>
+        <span class="k">else</span>
+          <span class="cn">Without raising this error, an unexpected directory not in the base directory would just be ignored</span>
+          <span class="k">raise</span> <span class="s2">&quot;Directory </span><span class="si">#{</span><span class="n">line</span><span class="si">}</span><span class="s2"> is not a sub-directory of base directory </span><span class="si">#{</span><span class="n">baseDir</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="n">directories</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Yield lines of output from the command to display hash values and file names</span>
+    <span class="c1"># of all files within the base directory</span>
+    <span class="cn">Without this, where would be no way to list all files in a directory on the remote system and determine the hash of the contents of the file</span>
+    <span class="k">def</span> <span class="nf">listFileHashLines</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, the base directory might be missing the final &#39;/&#39;, which might cause a one-off error when &#39;subtracting&#39; the base directory name from the absolute paths to get relative paths</span>
+      <span class="n">baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, we wouldn&#39;t know what command to run remotely to loop over the output of the file-files command and run the hash command on each line of output</span>
+      <span class="n">remoteFileHashLinesCommand</span> <span class="o">=</span> <span class="n">findFilesCommand</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span> <span class="o">+</span> <span class="o">[</span><span class="s2">&quot;|&quot;</span><span class="p">,</span> <span class="s2">&quot;xargs&quot;</span><span class="p">,</span> <span class="s2">&quot;-r&quot;</span><span class="o">]</span> <span class="o">+</span> <span class="vi">@hashCommand</span><span class="o">.</span><span class="n">command</span>
+      <span class="cn">Without this we wouldn&#39;t actually run the command just defined</span>
+      <span class="n">ssh</span><span class="p">(</span><span class="n">remoteFileHashLinesCommand</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">))</span> <span class="k">do</span> <span class="o">|</span><span class="n">line</span><span class="o">|</span> 
+        <span class="cn">Without this the line of output wouldn&#39;t be echoed to the user</span>
+        <span class="nb">puts</span> <span class="s2">&quot; </span><span class="si">#{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="cn">Without this the line of output (with a file name and a hash value) wouldn&#39;t be available to the caller of this method</span>
+        <span class="k">yield</span> <span class="n">line</span> 
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># List all files within the base directory to stdout</span>
+    <span class="cn">Without this, we wouldn&#39;t have a way to list what files are currently in the target directory on the remote host (i.e. if we wanted to see what files where currently there)</span>
+    <span class="k">def</span> <span class="nf">listFiles</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this, the base directory might be missing the final &#39;/&#39;, which might cause a one-off error when &#39;subtracting&#39; the base directory name from the absolute paths to get relative paths</span>
+      <span class="n">baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+      <span class="cn">Without this we wouldn&#39;t be executing the command to list all files in the remote directory</span>
+      <span class="n">ssh</span><span class="p">(</span><span class="n">findFilesCommand</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">))</span> <span class="k">do</span> <span class="o">|</span><span class="n">line</span><span class="o">|</span> 
+        <span class="cn">Without this we wouldn&#39;t be echoing the file name on this line for the user to read</span>
+        <span class="nb">puts</span> <span class="s2">&quot; </span><span class="si">#{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+  <span class="k">end</span>
+  
+  <span class="c1"># An object representing the content of a file within a ContentTree.</span>
+  <span class="c1"># The file may be marked for copying (if it&#39;s in a source ContentTree) </span>
+  <span class="c1"># or for deletion (if it&#39;s in a destination ContentTree)</span>
+  <span class="cn">Without this we would have no way to represent a named file within directory tree (so named with its relative path), and its contents</span>
+  <span class="k">class</span> <span class="nc">FileContent</span>
+    <span class="c1"># The name of the file</span>
+    <span class="cn">Without this, we won&#39;t know what the name of the file is</span>
+    <span class="kp">attr_reader</span> <span class="ss">:name</span>
+    
+    <span class="c1"># The hash value of the file&#39;s contents</span>
+    <span class="cn">Without this, we wouldn&#39;t know whether the file&#39;s contents are the same or not as the contents of some other file</span>
+    <span class="kp">attr_reader</span> <span class="ss">:hash</span>
+    
+    <span class="c1"># The components of the relative path where the file is found</span>
+    <span class="cn">Without this we wouldn&#39;t have that path broken into components corresponding to steps on the tree from its &quot;root&quot; to the branch corresponding to this file.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:parentPathElements</span>
+    
+    <span class="c1"># The destination to which the file should be copied</span>
+    <span class="cn">Without this we won&#39;t know where this file is to be individually copied to (for files that cannot be copied as part of a larger group)</span>
+    <span class="kp">attr_reader</span> <span class="ss">:copyDestination</span>
+    
+    <span class="c1"># Should this file be deleted</span>
+    <span class="cn">Without this we won&#39;t know whether this file is to be deleted (or not)</span>
+    <span class="kp">attr_reader</span> <span class="ss">:toBeDeleted</span>
+    
+    <span class="cn">Without this we can&#39;t construct an object representing our initial knowledge of a file that exists (and which we might later decide to mark for copying or for deletion)</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="nb">name</span><span class="p">,</span> <span class="nb">hash</span><span class="p">,</span> <span class="n">parentPathElements</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t remember the name of the file</span>
+      <span class="vi">@name</span> <span class="o">=</span> <span class="nb">name</span>
+      <span class="cn">Without this we won&#39;t know the hash of the contents of the file</span>
+      <span class="vi">@hash</span> <span class="o">=</span> <span class="nb">hash</span>
+      <span class="cn">Without this we won&#39;t know the path elements of the sub-directory (within the directory tree) containing the file</span>
+      <span class="vi">@parentPathElements</span> <span class="o">=</span> <span class="n">parentPathElements</span>
+      <span class="cn">Without this the file object won&#39;t be in a default state of _not_ to be copied</span>
+      <span class="vi">@copyDestination</span> <span class="o">=</span> <span class="kp">nil</span>
+      <span class="cn">Without this the file object won&#39;t be in a default state of _not_ to be deleted</span>
+      <span class="vi">@toBeDeleted</span> <span class="o">=</span> <span class="kp">false</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Mark this file to be copied to a destination directory (from a destination content tree)</span>
+    <span class="cn">Without this we can&#39;t decide to copy a local file to a remote directory</span>
+    <span class="k">def</span> <span class="nf">markToCopy</span><span class="p">(</span><span class="n">destinationDirectory</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t remember that the file is to be copied to the destination directory</span>
+      <span class="vi">@copyDestination</span> <span class="o">=</span> <span class="n">destinationDirectory</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Mark this file to be deleted</span>
+    <span class="cn">Without this we can&#39;t decide to delete a remote file</span>
+    <span class="k">def</span> <span class="nf">markToDelete</span>
+      <span class="cn">Without this we won&#39;t remember that this file is to be deleted</span>
+      <span class="vi">@toBeDeleted</span> <span class="o">=</span> <span class="kp">true</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this we can&#39;t easily and compactly display the file name and hash value</span>
+    <span class="k">def</span> <span class="nf">to_s</span>
+      <span class="k">return</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="nb">name</span><span class="si">}</span><span class="s2"> (</span><span class="si">#{</span><span class="nb">hash</span><span class="si">}</span><span class="s2">)&quot;</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># The relative name of this file in the content tree (relative to the base dir)</span>
+    <span class="cn">Without this we can&#39;t easily reconstruct the relative path as a single string</span>
+    <span class="k">def</span> <span class="nf">relativePath</span>
+      <span class="k">return</span> <span class="p">(</span><span class="n">parentPathElements</span> <span class="o">+</span> <span class="o">[</span><span class="nb">name</span><span class="o">]</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># A &quot;content tree&quot; consisting of a description of the contents of files and</span>
+  <span class="c1"># sub-directories within a base directory. The file contents are described via</span>
+  <span class="c1"># cryptographic hash values.</span>
+  <span class="c1"># Each sub-directory within a content tree is also represented as a ContentTree.</span>
+  <span class="cn">Without this we can&#39;t represent information about the contents of a set of files within sub-directories within a base directory on a local or remote system in a manner that let&#39;s us easily determine how a directory tree on a local system is different from the directory tree on a remote system (so we can efficiently sync from local to remote)</span>
+  <span class="k">class</span> <span class="nc">ContentTree</span>
+    <span class="c1"># name of the sub-directory within the containing directory (or nil if this is the base directory)</span>
+    <span class="cn">Without this we don&#39;t know the local name of the sub-directory (other then the base directory, for which we don&#39;t know or care about its local name, or it might not even have one, if its the actual root directory of the mounted file system)</span>
+    <span class="kp">attr_reader</span> <span class="ss">:name</span>
+    
+    <span class="c1"># path elements from base directory leading to this one</span>
+    <span class="cn">Without this we wouldn&#39;t have the path broken into components corresponding to steps on the tree from its &quot;root&quot; to the branch corresponding to this file.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:pathElements</span>
+    
+    <span class="c1"># files within this sub-directory (as FileContent&#39;s)</span>
+    <span class="cn">Without this we won&#39;t know what files are directly contained in this sub-directory</span>
+    <span class="kp">attr_reader</span> <span class="ss">:files</span>
+    
+    <span class="c1"># immediate sub-directories of this directory</span>
+    <span class="cn">Without this we won&#39;t know what directories are immediately contained in this sub-directory</span>
+    <span class="kp">attr_reader</span> <span class="ss">:dirs</span>
+    
+    <span class="c1"># the files within this sub-directory, indexed by file name</span>
+    <span class="cn">Without this we won&#39;t be able to directly and quickly retrieve a file by it&#39;s name (e.g. we already know the name of a file in another directory, and we want to find the same file it it exists in this directory)</span>
+    <span class="kp">attr_reader</span> <span class="ss">:fileByName</span>
+    
+    <span class="c1"># immediate sub-directories of this directory, indexed by name  </span>
+    <span class="cn">Without this we won&#39;t be able to directly and quickly retrieve a sub-directory by it&#39;s name (e.g. we already know the name of a sub-directory in another directory, and we want to find the same sub-directory it it exists in this directory)</span>
+    <span class="kp">attr_reader</span> <span class="ss">:dirByName</span>
+    
+    <span class="c1"># where this directory should be copied to</span>
+    <span class="cn">Without this we won&#39;t be able to know that this directory (and all its contents) is marked for copying to another directory on a remote system.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:copyDestination</span>
+    
+    <span class="c1"># whether this directory should be deleted</span>
+    <span class="cn">Without this we won&#39;t be able to know that the directory and all its contents are to be deleted.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:toBeDeleted</span>
+    
+    <span class="c1"># the UTC time (on the local system, even if this content tree represents a remote directory)</span>
+    <span class="c1"># that this content tree was constructed. Only set for the base directory.</span>
+    <span class="cn">Without this we won&#39;t be able to timestamp what time information about the base directory was read (so we can know if files within the content tree have changed because we see that their modification times are later than this timestamp)</span>
+    <span class="kp">attr_accessor</span> <span class="ss">:time</span>
+    
+    <span class="cn">Without this we won&#39;t be able to initialise information about this directory based on knowing it&#39;s name and it&#39;s relative path, ready to have information about files and sub-directories added to it, and ready to be marked for deletion or copying as required.</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="nb">name</span> <span class="o">=</span> <span class="kp">nil</span><span class="p">,</span> <span class="n">parentPathElements</span> <span class="o">=</span> <span class="kp">nil</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t remember the name of the directory</span>
+      <span class="vi">@name</span> <span class="o">=</span> <span class="nb">name</span>
+      <span class="cn">Without this we won&#39;t know the path elements of the sub-directory (within the directory tree) containing this directory</span>
+      <span class="vi">@pathElements</span> <span class="o">=</span> <span class="nb">name</span> <span class="o">==</span> <span class="kp">nil</span> <span class="p">?</span> <span class="o">[]</span> <span class="p">:</span> <span class="n">parentPathElements</span> <span class="o">+</span> <span class="o">[</span><span class="nb">name</span><span class="o">]</span>
+      <span class="cn">Without this we won&#39;t be ready to add files to the list of files in this directory</span>
+      <span class="vi">@files</span> <span class="o">=</span> <span class="o">[]</span>
+      <span class="cn">Without this we won&#39;t be ready to add directories to the list of sub-directories immediately contained in this directory</span>
+      <span class="vi">@dirs</span> <span class="o">=</span> <span class="o">[]</span>
+      <span class="cn">Without this we won&#39;t be ready to add files so we can look them up by name</span>
+      <span class="vi">@fileByName</span> <span class="o">=</span> <span class="p">{}</span>
+      <span class="cn">Without this we won&#39;t be ready to add immediate sub-directories so we can look them up by name</span>
+      <span class="vi">@dirByName</span> <span class="o">=</span> <span class="p">{}</span>
+      <span class="cn">Without this the directory object won&#39;t be in a default state of _not_ to be copied</span>
+      <span class="vi">@copyDestination</span> <span class="o">=</span> <span class="kp">nil</span>
+      <span class="cn">Without this the directory object won&#39;t be in a default state of _not_ to be deleted</span>
+      <span class="vi">@toBeDeleted</span> <span class="o">=</span> <span class="kp">false</span>
+      <span class="cn">Without this the directory object won&#39;t be in a default state of not yet having set the timestamp</span>
+      <span class="vi">@time</span> <span class="o">=</span> <span class="kp">nil</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># mark this directory to be copied to a destination directory</span>
+    <span class="cn">Without this we can&#39;t mark a directory to be copied to a directory on a remote system</span>
+    <span class="k">def</span> <span class="nf">markToCopy</span><span class="p">(</span><span class="n">destinationDirectory</span><span class="p">)</span>
+      <span class="cn">Without this it won&#39;t be marked for copying</span>
+      <span class="vi">@copyDestination</span> <span class="o">=</span> <span class="n">destinationDirectory</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># mark this directory (on a remote system) to be deleted</span>
+    <span class="cn">Without this we can&#39;t mark a directory (on a remote system) to be deleted</span>
+    <span class="k">def</span> <span class="nf">markToDelete</span>
+      <span class="cn">Without this it won&#39;t be marked for deletion</span>
+      <span class="vi">@toBeDeleted</span> <span class="o">=</span> <span class="kp">true</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># the path of the directory that this content tree represents, relative to the base directory</span>
+    <span class="cn">Without this we can&#39;t know the relative path of the sub-directory within the content tree</span>
+    <span class="k">def</span> <span class="nf">relativePath</span>
+      <span class="cn">Without this the path elements won&#39;t be joined together with &quot;/&quot; to get the relative path as a single string</span>
+      <span class="k">return</span> <span class="vi">@pathElements</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># convert a path string to an array of path elements (or return it as is if it&#39;s already an array)</span>
+    <span class="cn">Without this we can&#39;t start from a path and decompose it into elements (optionally allowing for the case where the conversion has already been done)</span>
+    <span class="k">def</span> <span class="nf">getPathElements</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+      <span class="cn">Without this path as a single string won&#39;t be decomposed into a list of elements</span>
+      <span class="k">return</span> <span class="n">path</span><span class="o">.</span><span class="n">is_a?</span><span class="p">(</span><span class="nb">String</span><span class="p">)</span> <span class="p">?</span> <span class="p">(</span><span class="n">path</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span> <span class="p">?</span> <span class="o">[]</span> <span class="p">:</span> <span class="n">path</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">))</span> <span class="p">:</span> <span class="n">path</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># get the content tree for a sub-directory (creating it if it doesn&#39;t yet exist)</span>
+    <span class="cn">Without this we can&#39;t create the content tree for an immediate sub-directory of the directory represented by this content tree (which means we can&#39;t recursively create the full content tree for this directory)</span>
+    <span class="k">def</span> <span class="nf">getContentTreeForSubDir</span><span class="p">(</span><span class="n">subDir</span><span class="p">)</span>
+      <span class="cn">Without this we won&#39;t know if the relevant sub-directory content tree hasn&#39;t already been created</span>
+      <span class="n">dirContentTree</span> <span class="o">=</span> <span class="n">dirByName</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">subDir</span><span class="p">,</span> <span class="kp">nil</span><span class="p">)</span>
+      <span class="cn">Without this check, we&#39;ll be recreated the sub-directory content tree, even if we know it has already been created</span>
+      <span class="k">if</span> <span class="n">dirContentTree</span> <span class="o">==</span> <span class="kp">nil</span>
+        <span class="cn">Without this the new sub-directory content tree won&#39;t be created</span>
+        <span class="n">dirContentTree</span> <span class="o">=</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">subDir</span><span class="p">,</span> <span class="vi">@pathElements</span><span class="p">)</span>
+        <span class="cn">Without this the new sub-directory won&#39;t be added to the list of sub-directories of this directory</span>
+        <span class="n">dirs</span> <span class="o">&lt;&lt;</span> <span class="n">dirContentTree</span>
+        <span class="cn">Without this we won&#39;t be able to find the sub-directory content tree by name</span>
+        <span class="n">dirByName</span><span class="o">[</span><span class="n">subDir</span><span class="o">]</span> <span class="o">=</span> <span class="n">dirContentTree</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="n">dirContentTree</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># add a sub-directory to this content tree</span>
+    <span class="c1"># Without this we won&#39;t be able to add a sub-directory (given as a path with possibly more than one element) into the content tree</span>
+    <span class="k">def</span> <span class="nf">addDir</span><span class="p">(</span><span class="n">dirPath</span><span class="p">)</span>
+      <span class="cn">Without this, the directory path won&#39;t be broken up into its elements</span>
+      <span class="n">pathElements</span> <span class="o">=</span> <span class="n">getPathElements</span><span class="p">(</span><span class="n">dirPath</span><span class="p">)</span>
+      <span class="cn">Without this check, it will fail in the case where dirPath has no elements in it</span>
+      <span class="k">if</span> <span class="n">pathElements</span><span class="o">.</span><span class="n">length</span> <span class="o">&gt;</span> <span class="mi">0</span>
+        <span class="cn">Without this, we won&#39;t know the first element in the path (which is needed to construct the immediate sub-directory content-tree representing the first part of the path)</span>
+        <span class="n">pathStart</span> <span class="o">=</span> <span class="n">pathElements</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span>
+        <span class="cn">Without this we won&#39;t know the rest of the elements so that we can add that part of the dir path into the content tree we&#39;ve just created</span>
+        <span class="n">restOfPath</span> <span class="o">=</span> <span class="n">pathElements</span><span class="o">[</span><span class="mi">1</span><span class="o">.</span><span class="n">.</span><span class="o">-</span><span class="mi">1</span><span class="o">]</span>
+        <span class="cn">Without this the immedate sub-directory content tree and the chain of sub-directories within that won&#39;t be created</span>
+        <span class="n">getContentTreeForSubDir</span><span class="p">(</span><span class="n">pathStart</span><span class="p">)</span><span class="o">.</span><span class="n">addDir</span><span class="p">(</span><span class="n">restOfPath</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># recursively sort the files and sub-directories of this content tree alphabetically</span>
+    <span class="cn">Without this, we will have to put up with sub-directories and file-directories being listed in whatever order the listing commands happen to list them in, which may not be consisted across different copies of effectively the same content tree on different systems.</span>
+    <span class="k">def</span> <span class="nf">sort!</span>
+      <span class="cn">Without this, the immediate sub-directories won&#39;t get sorted</span>
+      <span class="n">dirs</span><span class="o">.</span><span class="n">sort_by!</span> <span class="p">{</span><span class="o">|</span><span class="n">dir</span><span class="o">|</span> <span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="p">}</span>
+      <span class="cn">Without this, files contained immediately in this directory won&#39;t get sorted</span>
+      <span class="n">files</span><span class="o">.</span><span class="n">sort_by!</span> <span class="p">{</span><span class="o">|</span><span class="n">file</span><span class="o">|</span> <span class="n">file</span><span class="o">.</span><span class="n">name</span><span class="p">}</span>
+      <span class="cn">Without this, files and directories contained within sub-directories of this directory won&#39;t get sorted</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">dirs</span>
+        <span class="cn">Without this, this sub-directory won&#39;t have its contents sorted</span>
+        <span class="n">dir</span><span class="o">.</span><span class="n">sort!</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># given a relative path, add a file and hash value to this content tree</span>
+    <span class="cn">Without this, we can&#39;t add a file description (given as a relative path and a hash value) into the content tree for this directory</span>
+    <span class="k">def</span> <span class="nf">addFile</span><span class="p">(</span><span class="n">filePath</span><span class="p">,</span> <span class="nb">hash</span><span class="p">)</span>
+      <span class="cn">Without this the path won&#39;t be broken up into elements so that we can start by processing the first element</span>
+      <span class="n">pathElements</span> <span class="o">=</span> <span class="n">getPathElements</span><span class="p">(</span><span class="n">filePath</span><span class="p">)</span>
+      <span class="cn">Without this check, we would attempt to process an invalid path consisting of an empty string or no path elements (since the path should always contain at least one element consisting of the file name)</span>
+      <span class="k">if</span> <span class="n">pathElements</span><span class="o">.</span><span class="n">length</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="cn">Without this, the case of zero path elements will not be treated as an error</span>
+        <span class="k">raise</span> <span class="s2">&quot;Invalid file path: </span><span class="si">#{</span><span class="n">filePath</span><span class="o">.</span><span class="n">inspect</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="k">end</span>
+      <span class="cn">Without this check, the cases of having the immediate file name (to be added as a file in this directory) and having a file within a sub-directory will not be distinguished</span>
+      <span class="k">if</span> <span class="n">pathElements</span><span class="o">.</span><span class="n">length</span> <span class="o">==</span> <span class="mi">1</span>
+        <span class="cn">Without this, the single path element will not be treated as being the immediate file name</span>
+        <span class="n">fileName</span> <span class="o">=</span> <span class="n">pathElements</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span>
+        <span class="cn">Without this, we won&#39;t have our object representing the file name and a hash of its contents</span>
+        <span class="n">fileContent</span> <span class="o">=</span> <span class="no">FileContent</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="n">fileName</span><span class="p">,</span> <span class="nb">hash</span><span class="p">,</span> <span class="vi">@pathElements</span><span class="p">)</span>
+        <span class="cn">Without this, the file&amp;content object won&#39;t be added to the list of files contained in this directory</span>
+        <span class="n">files</span> <span class="o">&lt;&lt;</span> <span class="n">fileContent</span>
+        <span class="cn">Without this, we won&#39;t be able to look up the file&amp;content object by name.</span>
+        <span class="n">fileByName</span><span class="o">[</span><span class="n">fileName</span><span class="o">]</span> <span class="o">=</span> <span class="n">fileContent</span>
+      <span class="k">else</span>
+        <span class="cn">Without this, we won&#39;t have the first part of the file path required to identify the immediate sub-directory that it is found in.</span>
+        <span class="n">pathStart</span> <span class="o">=</span> <span class="n">pathElements</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span>
+        <span class="cn">Without this, we won&#39;t have the rest of the path which needs to be passed to the content tree in the immediate sub-directory</span>
+        <span class="n">restOfPath</span> <span class="o">=</span> <span class="n">pathElements</span><span class="o">[</span><span class="mi">1</span><span class="o">.</span><span class="n">.</span><span class="o">-</span><span class="mi">1</span><span class="o">]</span>
+        <span class="cn">Without this, the file &amp; hash won&#39;t be added into the sub-directory&#39;s content tree</span>
+        <span class="n">getContentTreeForSubDir</span><span class="p">(</span><span class="n">pathStart</span><span class="p">)</span><span class="o">.</span><span class="n">addFile</span><span class="p">(</span><span class="n">restOfPath</span><span class="p">,</span> <span class="nb">hash</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># date-time format for reading and writing times, e.g. &quot;2007-12-23 13:03:99.012 +0000&quot;</span>
+    <span class="cn">Without this, we won&#39;t have a simple easy to read&amp;write date time format for writing times in and out of content tree files.</span>
+    <span class="vc">@@dateTimeFormat</span> <span class="o">=</span> <span class="s2">&quot;%Y-%m-%d %H:%M:%S.%L %z&quot;</span>
+    
+    <span class="c1"># pretty-print this content tree</span>
+    <span class="cn">Without this, we won&#39;t have a way to output a nice easy-to-read description of this content tree object</span>
+    <span class="k">def</span> <span class="nf">showIndented</span><span class="p">(</span><span class="nb">name</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">indent</span> <span class="o">=</span> <span class="s2">&quot;  &quot;</span><span class="p">,</span> <span class="n">currentIndent</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+      <span class="cn">Without this check, would attempt to output time for directories other than the root directory for which time has not been recorded</span>
+      <span class="k">if</span> <span class="n">time</span> <span class="o">!=</span> <span class="kp">nil</span>
+        <span class="cn">Without this, any recorded time value wouldn&#39;t be output</span>
+        <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">currentIndent</span><span class="si">}</span><span class="s2">[TIME: </span><span class="si">#{</span><span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="vc">@@dateTimeFormat</span><span class="p">)</span><span class="si">}</span><span class="s2">]&quot;</span>
+      <span class="k">end</span>
+      <span class="cn">Without this check, an empty line would be output for root level (which has no name within the content tree)</span>
+      <span class="k">if</span> <span class="nb">name</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+        <span class="cn">Without this,non-root sub-directories would not be displayed</span>
+        <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">currentIndent</span><span class="si">}#{</span><span class="nb">name</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="k">end</span>
+      <span class="cn">Without this check, directories not to be copied would be shown as to be copied</span>
+      <span class="k">if</span> <span class="n">copyDestination</span> <span class="o">!=</span> <span class="kp">nil</span>
+        <span class="cn">Without this, directories marked to be copied would not be displayed as such</span>
+        <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">currentIndent</span><span class="si">}</span><span class="s2"> [COPY to </span><span class="si">#{</span><span class="n">copyDestination</span><span class="o">.</span><span class="n">relativePath</span><span class="si">}</span><span class="s2">]&quot;</span>
+      <span class="k">end</span>
+      <span class="cn">Without this check, directories not be to deleted would be shown as to be deleted</span>
+      <span class="k">if</span> <span class="n">toBeDeleted</span>
+        <span class="cn">Without this, directories marked to be deleted would not be displayed as such</span>
+        <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">currentIndent</span><span class="si">}</span><span class="s2"> [DELETE]&quot;</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, output for sub-directories and files would not be indented further than their parent</span>
+      <span class="n">nextIndent</span> <span class="o">=</span> <span class="n">currentIndent</span> <span class="o">+</span> <span class="n">indent</span>
+      <span class="cn">Without this, sub-directories of this directory won&#39;t be included in the output</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">dirs</span>
+        <span class="cn">Without this, this sub-directory won&#39;t be included in the output (suitable indented relative to the parent)</span>
+        <span class="n">dir</span><span class="o">.</span><span class="n">showIndented</span><span class="p">(</span><span class="s2">&quot;</span><span class="si">#{</span><span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">/&quot;</span><span class="p">,</span> <span class="n">indent</span> <span class="o">=</span> <span class="n">indent</span><span class="p">,</span> <span class="n">currentIndent</span> <span class="o">=</span> <span class="n">nextIndent</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, files contained immediately in this directory won&#39;t be included in the output</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="n">files</span>
+        <span class="cn">Without this, this file and the hash of its contents won&#39;t be shown in the output</span>
+        <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">nextIndent</span><span class="si">}#{</span><span class="n">file</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">  - </span><span class="si">#{</span><span class="n">file</span><span class="o">.</span><span class="n">hash</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="cn">Without this check, files not to be copied would be shown as to be copied</span>
+        <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">copyDestination</span> <span class="o">!=</span> <span class="kp">nil</span>
+          <span class="cn">Without this, files marked to be copied would not be displayed as such</span>
+          <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">nextIndent</span><span class="si">}</span><span class="s2"> [COPY to </span><span class="si">#{</span><span class="n">file</span><span class="o">.</span><span class="n">copyDestination</span><span class="o">.</span><span class="n">relativePath</span><span class="si">}</span><span class="s2">]&quot;</span>
+        <span class="k">end</span>
+        <span class="cn">Without this check, files not to be deleted would be shown as to be deleted</span>
+        <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">toBeDeleted</span>
+          <span class="cn">Without this, files marked to be deleted would not be displayed as such</span>
+          <span class="nb">puts</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">nextIndent</span><span class="si">}</span><span class="s2"> [DELETE]&quot;</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+
+    <span class="c1"># write this content tree to an open file, indented</span>
+    <span class="cn">Without this, the details for the content tree could not be output to a file in a format that could be read in again (by readFromFile)</span>
+    <span class="k">def</span> <span class="nf">writeLinesToFile</span><span class="p">(</span><span class="n">outFile</span><span class="p">,</span> <span class="n">prefix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+      <span class="cn">Without this check, it would attempt to write out a time value when none was available</span>
+      <span class="k">if</span> <span class="n">time</span> <span class="o">!=</span> <span class="kp">nil</span>
+        <span class="cn">Without this, a line for the time value would not be written to the file</span>
+        <span class="n">outFile</span><span class="o">.</span><span class="n">puts</span><span class="p">(</span><span class="s2">&quot;T </span><span class="si">#{</span><span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="vc">@@dateTimeFormat</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, directory information would not be written to the file (for immediate sub-directories)</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">dirs</span>
+        <span class="cn">Without this, a line for this sub-directory would not be written to the file</span>
+        <span class="n">outFile</span><span class="o">.</span><span class="n">puts</span><span class="p">(</span><span class="s2">&quot;D </span><span class="si">#{</span><span class="n">prefix</span><span class="si">}#{</span><span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="cn">Without this, lines for the sub-directories and files contained with this directory would not be written to the file</span>
+        <span class="n">dir</span><span class="o">.</span><span class="n">writeLinesToFile</span><span class="p">(</span><span class="n">outFile</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">#{</span><span class="n">prefix</span><span class="si">}#{</span><span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">/&quot;</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, information for files directly contained within this directory would not be written to the file</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="n">files</span>
+      <span class="cn">Without this, the line for this file would not be written to the file</span>
+        <span class="n">outFile</span><span class="o">.</span><span class="n">puts</span><span class="p">(</span><span class="s2">&quot;F </span><span class="si">#{</span><span class="n">file</span><span class="o">.</span><span class="n">hash</span><span class="si">}</span><span class="s2"> </span><span class="si">#{</span><span class="n">prefix</span><span class="si">}#{</span><span class="n">file</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># write this content tree to a file (in a format which readFromFile can read back in)</span>
+    <span class="cn">Without this, information for a content tree could not be output to a named file  in a format that could be read in again (by readFromFile)</span>
+    <span class="k">def</span> <span class="nf">writeToFile</span><span class="p">(</span><span class="n">fileName</span><span class="p">)</span>
+      <span class="cn">Without this, the user would not have feedback that the content tree is being written to the named file</span>
+      <span class="nb">puts</span> <span class="s2">&quot;Writing content tree to file </span><span class="si">#{</span><span class="n">fileName</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+      <span class="cn">Without this, the named file cannot be written to</span>
+      <span class="no">File</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">fileName</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">do</span> <span class="o">|</span><span class="n">outFile</span><span class="o">|</span>
+        <span class="cn">Without this, the lines of information for the content tree will not be written to the open file</span>
+        <span class="n">writeLinesToFile</span><span class="p">(</span><span class="n">outFile</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># regular expression for directory entries in content tree file</span>
+    <span class="cn">Without this, we have no way to parse the &quot;D&quot; directory lines output by writeLinesToFile</span>
+    <span class="vc">@@dirLineRegex</span> <span class="o">=</span> <span class="sr">/^D (.*)$/</span>
+    
+    <span class="c1"># regular expression for file entries in content tree file</span>
+    <span class="cn">Without this, we have no way to parse the &quot;F&quot; file lines output by writeLinesToFile</span>
+    <span class="vc">@@fileLineRegex</span> <span class="o">=</span> <span class="sr">/^F ([^ ]*) (.*)$/</span>
+    
+    <span class="c1"># regular expression for time entry in content tree file</span>
+    <span class="cn">Without this, we have no way to parse the &quot;T&quot; time lines output by writeLinesToFile</span>
+    <span class="vc">@@timeRegex</span> <span class="o">=</span> <span class="sr">/^T (.*)$/</span>
+    
+    <span class="c1"># read a content tree from a file (in format written by writeToFile)</span>
+    <span class="cn">Without this method, we don&#39;t know how to read in a content tree from a file written out by writeToFile</span>
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">readFromFile</span><span class="p">(</span><span class="n">fileName</span><span class="p">)</span>
+      <span class="cn">Without this, we don&#39;t have an empty ContentTree ready to be populated with information read in from the file</span>
+      <span class="n">contentTree</span> <span class="o">=</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">new</span><span class="p">()</span>
+      <span class="cn">Without this, the user does not receive feedback that the content tree is being read in from the named file</span>
+      <span class="nb">puts</span> <span class="s2">&quot;Reading content tree from </span><span class="si">#{</span><span class="n">fileName</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+      <span class="cn">Without this, we can&#39;t read through the lines in the content tree file</span>
+      <span class="no">IO</span><span class="o">.</span><span class="n">foreach</span><span class="p">(</span><span class="n">fileName</span><span class="p">)</span> <span class="k">do</span> <span class="o">|</span><span class="n">line</span><span class="o">|</span>
+        <span class="cn">Without this, we can&#39;t parse a line that might be a &quot;D&quot; directory line</span>
+        <span class="n">dirLineMatch</span> <span class="o">=</span> <span class="vc">@@dirLineRegex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+        <span class="cn">Without this check, we would attempt to parse a non-directory line as if it was a directory line</span>
+        <span class="k">if</span> <span class="n">dirLineMatch</span>
+          <span class="cn">Without this, we would not extract the actual directory name from the D line</span>
+          <span class="n">dirName</span> <span class="o">=</span> <span class="n">dirLineMatch</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span>
+          <span class="cn">Without this, the extracted directory name would not be recorded into the content tree</span>
+          <span class="n">contentTree</span><span class="o">.</span><span class="n">addDir</span><span class="p">(</span><span class="n">dirName</span><span class="p">)</span>
+        <span class="k">else</span>
+        <span class="cn">Without this, we can&#39;t parse a line that might be an &quot;F&quot; file line</span>
+          <span class="n">fileLineMatch</span> <span class="o">=</span> <span class="vc">@@fileLineRegex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+          <span class="cn">Without this check, we would attempt to parse a non-file line as if it was a file line</span>
+          <span class="k">if</span> <span class="n">fileLineMatch</span>
+            <span class="cn">Without this, we would not extract the actual hash value from the F line</span>
+            <span class="nb">hash</span> <span class="o">=</span> <span class="n">fileLineMatch</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span>
+            <span class="cn">Without this, we would not extract the actual file name from the F line</span>
+            <span class="n">fileName</span> <span class="o">=</span> <span class="n">fileLineMatch</span><span class="o">[</span><span class="mi">2</span><span class="o">]</span>
+            <span class="cn">Without this, the extracted file name and hash value would not be recorded into the content tree</span>
+            <span class="n">contentTree</span><span class="o">.</span><span class="n">addFile</span><span class="p">(</span><span class="n">fileName</span><span class="p">,</span> <span class="nb">hash</span><span class="p">)</span>
+          <span class="k">else</span>
+            <span class="cn">Without this, we can&#39;t parse a line that might be an &quot;T&quot; file line</span>
+            <span class="n">timeLineMatch</span> <span class="o">=</span> <span class="vc">@@timeRegex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+            <span class="cn">Without this check, we would attempt to parse a non-time line as if it was a time line</span>
+            <span class="k">if</span> <span class="n">timeLineMatch</span>
+              <span class="cn">Without this, we would not extract the actual time value from the T line</span>
+              <span class="n">timeString</span> <span class="o">=</span> <span class="n">timeLineMatch</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span>
+              <span class="cn">Without this, the extracted time value would not be recorded into the content tree</span>
+              <span class="n">contentTree</span><span class="o">.</span><span class="n">time</span> <span class="o">=</span> <span class="no">Time</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">timeString</span><span class="p">,</span> <span class="vc">@@dateTimeFormat</span><span class="p">)</span>
+            <span class="k">else</span>
+              <span class="cn">Without this, we would silently ignore an invalid line read in from the content file (which might indicate a bug in the coded which wrote the file, or that we are trying to read the wrong file)</span>
+              <span class="k">raise</span> <span class="s2">&quot;Invalid line in content tree file: </span><span class="si">#{</span><span class="n">line</span><span class="o">.</span><span class="n">inspect</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="k">end</span>
+          <span class="k">end</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="n">contentTree</span>
+    <span class="k">end</span>
+
+    <span class="c1"># read a content tree as a map of hashes, i.e. from relative file path to hash value for the file</span>
+    <span class="c1"># Actually returns an array of the time entry (if any) and the map of hashes</span>
+    <span class="cn">Without this we wouldn&#39;t have an easy way to construct a mapping from file name to hash of contents (and also a time value, so we can determine that the hash value might be incorrect for any file with a modification time later than that time) that didn&#39;t involve reading in a whole content tree, and then processing that to construct the mapping</span>
+    <span class="k">def</span> <span class="nc">self</span><span class="o">.</span><span class="nf">readMapOfHashesFromFile</span><span class="p">(</span><span class="n">fileName</span><span class="p">)</span>
+      <span class="cn">Without this, we wouldn&#39;t have an empty map to populate with value to be read from the file</span>
+      <span class="n">mapOfHashes</span> <span class="o">=</span> <span class="p">{}</span>
+      <span class="cn">Without this, we wouldn&#39;t have an empty time value to populate from the file</span>
+      <span class="n">time</span> <span class="o">=</span> <span class="kp">nil</span>
+      <span class="cn">Without this, we couldn&#39;t read lines from the named file</span>
+      <span class="no">File</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">fileName</span><span class="p">)</span><span class="o">.</span><span class="n">each_line</span> <span class="k">do</span> <span class="o">|</span><span class="n">line</span><span class="o">|</span>
+        <span class="cn">Without this, we can&#39;t parse a line that might be an &quot;F&quot; file line</span>
+        <span class="n">fileLineMatch</span> <span class="o">=</span> <span class="vc">@@fileLineRegex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+          <span class="cn">Without this check, we would attempt to parse a non-file line as if it was a file line</span>
+          <span class="k">if</span> <span class="n">fileLineMatch</span>
+            <span class="cn">Without this, we would not extract the actual hash value from the F line</span>
+            <span class="nb">hash</span> <span class="o">=</span> <span class="n">fileLineMatch</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span>
+            <span class="cn">Without this, we would not extract the actual file name from the F line</span>
+            <span class="n">fileName</span> <span class="o">=</span> <span class="n">fileLineMatch</span><span class="o">[</span><span class="mi">2</span><span class="o">]</span>
+            <span class="cn">Without this, the extracted file name and hash value would not be recorded into the map</span>
+            <span class="n">mapOfHashes</span><span class="o">[</span><span class="n">fileName</span><span class="o">]</span> <span class="o">=</span> <span class="nb">hash</span>
+          <span class="k">end</span>
+        <span class="cn">Without this, we can&#39;t parse a line that might be an &quot;T&quot; file line</span>
+        <span class="n">timeLineMatch</span> <span class="o">=</span> <span class="vc">@@timeRegex</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+        <span class="cn">Without this check, we would attempt to parse a non-time line as if it was a time line</span>
+        <span class="k">if</span> <span class="n">timeLineMatch</span>
+          <span class="cn">Without this, we would not extract the actual time value from the T line</span>
+          <span class="n">timeString</span> <span class="o">=</span> <span class="n">timeLineMatch</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span>
+          <span class="cn">Without this, the extracted time value would not be recorded</span>
+          <span class="n">time</span> <span class="o">=</span> <span class="no">Time</span><span class="o">.</span><span class="n">strptime</span><span class="p">(</span><span class="n">timeString</span><span class="p">,</span> <span class="vc">@@dateTimeFormat</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="o">[</span><span class="n">time</span><span class="p">,</span> <span class="n">mapOfHashes</span><span class="o">]</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Mark operations for this (source) content tree and the destination content tree</span>
+    <span class="c1"># in order to synch the destination content tree with this one</span>
+    <span class="k">def</span> <span class="nf">markSyncOperationsForDestination</span><span class="p">(</span><span class="n">destination</span><span class="p">)</span>
+      <span class="n">markCopyOperations</span><span class="p">(</span><span class="n">destination</span><span class="p">)</span>
+      <span class="n">destination</span><span class="o">.</span><span class="n">markDeleteOptions</span><span class="p">(</span><span class="nb">self</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Get the named sub-directory content tree, if it exists</span>
+    <span class="cn">Without this we wouln&#39;t have an easy way to get an immediate sub-directory by name, but returning nil for one that doesn&#39;t exist (in the case where the name is from a different directory, and that directory doesn&#39;t exist in this one)</span>
+    <span class="k">def</span> <span class="nf">getDir</span><span class="p">(</span><span class="n">dir</span><span class="p">)</span>
+      <span class="k">return</span> <span class="n">dirByName</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">dir</span><span class="p">,</span> <span class="kp">nil</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Get the named file &amp; hash value, if it exists</span>
+    <span class="cn">Without this we wouln&#39;t have an easy way to get an immediate file &amp; hash by name, but returning nil for one that doesn&#39;t exist (in the case where the name is from a different directory, and that file doesn&#39;t exist in this one)</span>
+    <span class="k">def</span> <span class="nf">getFile</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+      <span class="k">return</span> <span class="n">fileByName</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="kp">nil</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Mark copy operations, given that the corresponding destination directory already exists.</span>
+    <span class="c1"># For files and directories that don&#39;t exist in the destination, mark them to be copied.</span>
+    <span class="c1"># For sub-directories that do exist, recursively mark the corresponding sub-directory copy operations.</span>
+    <span class="cn">Without this we won&#39;t know how to mark which sub-directories and files in this (source) directory need to by marked for copying into the other directory, because they don&#39;t exist in the other (destination) directory</span>
+    <span class="k">def</span> <span class="nf">markCopyOperations</span><span class="p">(</span><span class="n">destinationDir</span><span class="p">)</span>
+      <span class="cn">Without this we can&#39;t loop over the immediate sub-directories to determine how each one needs to be marked for copying</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">dirs</span>
+        <span class="cn">Without this we won&#39;t have the corresponding sub-directory in the other directory with the same name as this sub-directory (if it exists)</span>
+        <span class="n">destinationSubDir</span> <span class="o">=</span> <span class="n">destinationDir</span><span class="o">.</span><span class="n">getDir</span><span class="p">(</span><span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="cn">Without this check, we won&#39;t be able to correctly process a sub-directory based on whether or not one with the same name exists in the other directory</span>
+        <span class="k">if</span> <span class="n">destinationSubDir</span> <span class="o">!=</span> <span class="kp">nil</span>
+          <span class="cn">Without this, files and directories missing or changed from the other sub-directory (which does exist) won&#39;t get copied</span>
+          <span class="n">dir</span><span class="o">.</span><span class="n">markCopyOperations</span><span class="p">(</span><span class="n">destinationSubDir</span><span class="p">)</span>
+        <span class="k">else</span>
+          <span class="cn">Without this, the corresponding missing sub-directory in the other directory won&#39;t get updated from this sub-directory</span>
+          <span class="n">dir</span><span class="o">.</span><span class="n">markToCopy</span><span class="p">(</span><span class="n">destinationDir</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="cn">Without this we can&#39;t loop over the files to determine how each one needs to be marked for copying</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="n">files</span>
+        <span class="cn">Without this we won&#39;t have the corresponding file in the other directory with the same name as this file (if it exists)</span>
+        <span class="n">destinationFile</span> <span class="o">=</span> <span class="n">destinationDir</span><span class="o">.</span><span class="n">getFile</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="cn">Without this check, this file will get copied, even if it doesn&#39;t need to be (it only needs to be if it is missing, or the hash is different)</span>
+        <span class="k">if</span> <span class="n">destinationFile</span> <span class="o">==</span> <span class="kp">nil</span> <span class="ow">or</span> <span class="n">destinationFile</span><span class="o">.</span><span class="n">hash</span> <span class="o">!=</span> <span class="n">file</span><span class="o">.</span><span class="n">hash</span>
+          <span class="cn">Without this, a file that is missing or changed won&#39;t get copied (even though it needs to be)</span>
+          <span class="n">file</span><span class="o">.</span><span class="n">markToCopy</span><span class="p">(</span><span class="n">destinationDir</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Mark delete operations, given that the corresponding source directory exists.</span>
+    <span class="c1"># For files and directories that don&#39;t exist in the source, mark them to be deleted.</span>
+    <span class="c1"># For sub-directories that do exist, recursively mark the corresponding sub-directory delete operations.</span>
+    <span class="cn">Without this we won&#39;t know how to mark which sub-directories and files in this (destination) directory need to by marked for deleting (because they don&#39;t exist in the other source directory)</span>
+    <span class="k">def</span> <span class="nf">markDeleteOptions</span><span class="p">(</span><span class="n">sourceDir</span><span class="p">)</span>
+      <span class="cn">Without this we can&#39;t loop over the immediate sub-directories to determine how each one needs to be marked for deleting</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">dirs</span>
+        <span class="cn">Without this we won&#39;t have the corresponding sub-directory in the other directory with the same name as this sub-directory (if it exists)</span>
+        <span class="n">sourceSubDir</span> <span class="o">=</span> <span class="n">sourceDir</span><span class="o">.</span><span class="n">getDir</span><span class="p">(</span><span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="cn">Without this check, we won&#39;t be able to correctly process a sub-directory based on whether or not one with the same name exists in the other directory</span>
+        <span class="k">if</span> <span class="n">sourceSubDir</span> <span class="o">==</span> <span class="kp">nil</span>
+          <span class="cn">Without this, this directory won&#39;t be deleted, even though it doesn&#39;t exist at all in the corresponding source directory</span>
+          <span class="n">dir</span><span class="o">.</span><span class="n">markToDelete</span><span class="p">()</span>
+        <span class="k">else</span>
+          <span class="cn">Without this, files and directories missing from the other source sub-directory (which does exist) won&#39;t get deleted</span>
+          <span class="n">dir</span><span class="o">.</span><span class="n">markDeleteOptions</span><span class="p">(</span><span class="n">sourceSubDir</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="cn">Without this we can&#39;t loop over the files to determine which ones need to be marked for deleting</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="n">files</span>
+        <span class="cn">Without this we won&#39;t known if the corresponding file in the source directory with the same name as this file exists</span>
+        <span class="n">sourceFile</span> <span class="o">=</span> <span class="n">sourceDir</span><span class="o">.</span><span class="n">getFile</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+        <span class="cn">Without this check, we will incorrectly delete this file whether or not it exists in the source directory</span>
+        <span class="k">if</span> <span class="n">sourceFile</span> <span class="o">==</span> <span class="kp">nil</span>
+          <span class="cn">Without this, this file which doesn&#39;t exist in the source directory won&#39;t get deleted from this directory</span>
+          <span class="n">file</span><span class="o">.</span><span class="n">markToDelete</span><span class="p">()</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># Base class for a content location which consists of a base directory</span>
+  <span class="c1"># on a local or remote system.</span>
+  <span class="cn">Without this class, there would be no place to put code common to the representation of the local file system and the representation of the remote file system</span>
+  <span class="k">class</span> <span class="nc">ContentLocation</span>
+    
+    <span class="c1"># The name of a file used to hold a cached content tree for this location (can optionally be specified)</span>
+    <span class="cn">Without the cached content file, it would be necessary to list all files and calculate hashes of all files (for both the local and remote file system) every time a sync operation is performed.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:cachedContentFile</span>
+    
+    <span class="cn">Without this constructor, there is no way to construct a content location object with read-only cached content file attribute</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="cn">Without this the name of the cached content file won&#39;t be remembered</span>
+      <span class="vi">@cachedContentFile</span> <span class="o">=</span> <span class="n">cachedContentFile</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Get the cached content file name, if specified, and if the file exists</span>
+    <span class="cn">Without this there is no easy way to get the existing cached content tree (if the cached content file is specified, and if the file exists)</span>
+    <span class="k">def</span> <span class="nf">getExistingCachedContentTreeFile</span>
+      <span class="cn">Without this check, it would try to find the cached content file when none was specified</span>
+      <span class="k">if</span> <span class="n">cachedContentFile</span> <span class="o">==</span> <span class="kp">nil</span>
+        <span class="cn">Without this, there will be no feedback to the user that no cached content file is specified</span>
+        <span class="nb">puts</span> <span class="s2">&quot;No cached content file specified for location&quot;</span>
+        <span class="k">return</span> <span class="kp">nil</span>
+      <span class="cn">Without this check, it will try to open the cached content file when it doesn&#39;t exist (i.e. because it hasn&#39;t been created, or, it has been deleted)</span>
+      <span class="k">elsif</span> <span class="no">File</span><span class="o">.</span><span class="n">exists?</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+        <span class="cn">Without this, it won&#39;t return the cached content file when it does exist</span>
+        <span class="k">return</span> <span class="n">cachedContentFile</span>
+      <span class="k">else</span>
+        <span class="cn">Without this, there won&#39;t be feedback to the user that the specified cached content file doesn&#39;t exist.</span>
+        <span class="nb">puts</span> <span class="s2">&quot;Cached content file </span><span class="si">#{</span><span class="n">cachedContentFile</span><span class="si">}</span><span class="s2"> does not yet exist.&quot;</span>
+        <span class="k">return</span> <span class="kp">nil</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Delete any existing cached content file</span>
+    <span class="cn">Without this, there won&#39;t be an easy way to delete the cached content file (if it is specified and it exists)</span>
+    <span class="k">def</span> <span class="nf">clearCachedContentFile</span>
+      <span class="cn">Without this check, it will try to delete a cached content file even when it doesn&#39;t exist</span>
+      <span class="k">if</span> <span class="n">cachedContentFile</span> <span class="ow">and</span> <span class="no">File</span><span class="o">.</span><span class="n">exists?</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+        <span class="cn">Without this, there will be no feedback to the user that the specified cached content file is being deleted</span>
+        <span class="nb">puts</span> <span class="s2">&quot; deleting cached content file </span><span class="si">#{</span><span class="n">cachedContentFile</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+        <span class="cn">Without this, the specified cached content file won&#39;t be deleted</span>
+        <span class="no">File</span><span class="o">.</span><span class="n">delete</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Get the cached content tree (if any), read from the specified cached content file.</span>
+    <span class="cn">Without this method, there won&#39;t be an easy way to get the cached content from the cached content file (if the file is specified, and if it exists)</span>
+    <span class="k">def</span> <span class="nf">getCachedContentTree</span>
+      <span class="cn">Without this, we won&#39;t know the name of the specified cached content file (if it is specified)</span>
+      <span class="n">file</span> <span class="o">=</span> <span class="n">getExistingCachedContentTreeFile</span>
+      <span class="cn">Without this check, we would attempt to read a non-existent file</span>
+      <span class="k">if</span> <span class="n">file</span>
+        <span class="cn">Without this, a content tree that has been cached won&#39;t be returned.</span>
+        <span class="k">return</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">readFromFile</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+      <span class="k">else</span>
+        <span class="k">return</span> <span class="kp">nil</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Read a map of file hashes (mapping from relative file name to hash value) from the</span>
+    <span class="c1"># specified cached content file</span>
+    <span class="cn">Without this, there won&#39;t be an easy way to get a map of file hashes (keyed by relative file name), for the purpose of getting the hashes of existing files which are known not to have changed (by comparing modification time to timestamp, which is also returned)</span>
+    <span class="k">def</span> <span class="nf">getCachedContentTreeMapOfHashes</span>
+      <span class="cn">Without this, we won&#39;t know the name of the specified cached content file (if it is specified)</span>
+      <span class="n">file</span> <span class="o">=</span> <span class="n">getExistingCachedContentTreeFile</span>
+      <span class="cn">Without this check, we would attempt to read a non-existent file</span>
+      <span class="k">if</span> <span class="n">file</span>
+        <span class="cn">Without this, there won&#39;t be feedback to the user that we are reading the cached file hashes</span>
+        <span class="nb">puts</span> <span class="s2">&quot;Reading cached file hashes from </span><span class="si">#{</span><span class="n">file</span><span class="si">}</span><span class="s2"> ...&quot;</span>
+        <span class="cn">Without this, a map of cached file hashes won&#39;t be returned</span>
+        <span class="k">return</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">readMapOfHashesFromFile</span><span class="p">(</span><span class="n">file</span><span class="p">)</span>
+      <span class="k">else</span>
+        <span class="cn">Without this, the method wouldn&#39;t consistently return an array of timestamp + map of hashes in the case where there is no cached content file</span>
+        <span class="k">return</span> <span class="o">[</span><span class="kp">nil</span><span class="p">,</span> <span class="p">{}</span><span class="o">]</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+  <span class="k">end</span>
+  
+  <span class="c1"># A directory of files on a local system. The corresponding content tree</span>
+  <span class="c1"># can be calculated directly using Ruby library functions.</span>
+  <span class="cn">Without this class, there would be no representation for a &quot;local&quot; content location, i.e. a directory on the user&#39;s local system</span>
+  <span class="k">class</span> <span class="nc">LocalContentLocation</span><span class="o">&lt;</span><span class="no">ContentLocation</span>
+    
+    <span class="c1"># the base directory, for example of type Based::BaseDirectory. Methods invoked are: allFiles, subDirs and fullPath.</span>
+    <span class="c1"># For file and dir objects returned by allFiles &amp; subDirs, methods invoked are: relativePath and fullPath</span>
+    <span class="cn">Without this, we won&#39;t know where on the local system the directory is</span>
+    <span class="kp">attr_reader</span> <span class="ss">:baseDirectory</span>
+    <span class="c1"># the ruby class that generates the hash, e.g. Digest::SHA256</span>
+    <span class="cn">Without this, we won&#39;t know which hash function to apply to files</span>
+    <span class="kp">attr_reader</span> <span class="ss">:hashClass</span>
+    
+    <span class="cn">Without this, we won&#39;t be able to construct an object representing a local content location, with read-only attributes specifying the directory, the hash function, and, optionally, the name of the cached content file.</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">baseDirectory</span><span class="p">,</span> <span class="n">hashClass</span><span class="p">,</span> <span class="n">cachedContentFile</span> <span class="o">=</span> <span class="kp">nil</span><span class="p">)</span>
+      <span class="cn">Without this, we won&#39;t remember the cached content file name</span>
+      <span class="k">super</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="cn">Without this, we won&#39;t remember the base directory</span>
+      <span class="vi">@baseDirectory</span> <span class="o">=</span> <span class="n">baseDirectory</span>
+      <span class="cn">Without this, we won&#39;t remember the hash function</span>
+      <span class="vi">@hashClass</span> <span class="o">=</span> <span class="n">hashClass</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># get the full path of a relative path (i.e. of a file/directory within the base directory)</span>
+    <span class="cn">Without this, we won&#39;t have an easy way to calculate the full path of a file or directory in the content tree that is specified by its relative path.</span>
+    <span class="k">def</span> <span class="nf">getFullPath</span><span class="p">(</span><span class="n">relativePath</span><span class="p">)</span>
+      <span class="k">return</span> <span class="vi">@baseDirectory</span><span class="o">.</span><span class="n">fullPath</span> <span class="o">+</span> <span class="n">relativePath</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># get the content tree for this base directory by iterating over all</span>
+    <span class="c1"># sub-directories and files within the base directory (and excluding the excluded files)</span>
+    <span class="c1"># and calculating file hashes using the specified Ruby hash class</span>
+    <span class="c1"># If there is an existing cached content file, use that to get the hash values</span>
+    <span class="c1"># of files whose modification time is earlier than the time value for the cached content tree.</span>
+    <span class="c1"># Also, if a cached content file is specified, write the final content tree back out to the cached content file.</span>
+    <span class="cn">Without this we won&#39;t have way to get the content tree object describing the contents of the local directory</span>
+    <span class="k">def</span> <span class="nf">getContentTree</span>
+      <span class="cn">Without this we won&#39;t have timestamp and the map of file hashes used to efficiently determine the hash of a file which hasn&#39;t been modified after the timestamp</span>
+      <span class="n">cachedTimeAndMapOfHashes</span> <span class="o">=</span> <span class="n">getCachedContentTreeMapOfHashes</span>
+      <span class="cn">Without this we won&#39;t have the timestamp to compare against file modification times</span>
+      <span class="n">cachedTime</span> <span class="o">=</span> <span class="n">cachedTimeAndMapOfHashes</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span>
+      <span class="cn">Without this we won&#39;t have the map of file hashes</span>
+      <span class="n">cachedMapOfHashes</span> <span class="o">=</span> <span class="n">cachedTimeAndMapOfHashes</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span>
+      <span class="cn">Without this we won&#39;t have an empty content tree which can be populated with data describing the files and directories within the base directory</span>
+      <span class="n">contentTree</span> <span class="o">=</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">new</span><span class="p">()</span>
+      <span class="cn">Without this we won&#39;t have a record of a time which precedes the recording of directories, files and hashes (which can be used when this content tree is used as a cached for data when constructing some future content tree)</span>
+      <span class="n">contentTree</span><span class="o">.</span><span class="n">time</span> <span class="o">=</span> <span class="no">Time</span><span class="o">.</span><span class="n">now</span><span class="o">.</span><span class="n">utc</span>
+      <span class="cn">Without this, we won&#39;t record information about all sub-directories within this content tree</span>
+      <span class="k">for</span> <span class="n">subDir</span> <span class="k">in</span> <span class="vi">@baseDirectory</span><span class="o">.</span><span class="n">subDirs</span>
+        <span class="cn">Without this, this sub-directory won&#39;t be recorded in the content tree</span>
+        <span class="n">contentTree</span><span class="o">.</span><span class="n">addDir</span><span class="p">(</span><span class="n">subDir</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, we won&#39;t record information about the names and contents of all files within this content tree</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="vi">@baseDirectory</span><span class="o">.</span><span class="n">allFiles</span>
+        <span class="cn">Without this, we won&#39;t know the digest of this file (if we happen to have it) from the cached content tree</span>
+        <span class="n">cachedDigest</span> <span class="o">=</span> <span class="n">cachedMapOfHashes</span><span class="o">[</span><span class="n">file</span><span class="o">.</span><span class="n">relativePath</span><span class="o">]</span>
+        <span class="cn">Without this check, we would assume that the cached digest applies to the current file, even if one wasn&#39;t available, or if the file has been modified since the time when the cached value was determined.</span>
+        <span class="c1"># (Extra note: just checking the file&#39;s mtime is not a perfect check, because a file can &quot;change&quot; when actually it or one of it&#39;s enclosing sub-directories has been renamed, which might not reset the mtime value for the file itself.)</span>
+        <span class="k">if</span> <span class="n">cachedTime</span> <span class="ow">and</span> <span class="n">cachedDigest</span> <span class="ow">and</span> <span class="no">File</span><span class="o">.</span><span class="n">stat</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">fullPath</span><span class="p">)</span><span class="o">.</span><span class="n">mtime</span> <span class="o">&lt;</span> <span class="n">cachedTime</span>
+          <span class="cn">Without this, the digest won&#39;t be recorded from the cached digest in those cases where we know the file hasn&#39;t changed</span>
+          <span class="n">digest</span> <span class="o">=</span> <span class="n">cachedDigest</span>
+        <span class="k">else</span>
+          <span class="cn">Without this, a new digest won&#39;t be determined from the calculated hash of the file&#39;s actual contents</span>
+          <span class="n">digest</span> <span class="o">=</span> <span class="n">hashClass</span><span class="o">.</span><span class="n">file</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">fullPath</span><span class="p">)</span><span class="o">.</span><span class="n">hexdigest</span>
+        <span class="k">end</span>
+        <span class="cn">Without this, information about this file won&#39;t be added to the content tree</span>
+        <span class="n">contentTree</span><span class="o">.</span><span class="n">addFile</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">relativePath</span><span class="p">,</span> <span class="n">digest</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, the files and directories in the content tree might be listed in some indeterminate order</span>
+      <span class="n">contentTree</span><span class="o">.</span><span class="n">sort!</span>
+      <span class="cn">Without this check, a new version of the cached content file will attempt to be written, even when no name has been specified for the cached content file</span>
+      <span class="k">if</span> <span class="n">cachedContentFile</span> <span class="o">!=</span> <span class="kp">nil</span>
+        <span class="cn">Without this, a new version of the cached content file (ready to be used next time) won&#39;t be created</span>
+        <span class="n">contentTree</span><span class="o">.</span><span class="n">writeToFile</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="k">return</span> <span class="n">contentTree</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  
+  <span class="c1"># A directory of files on a remote system</span>
+  <span class="cn">Without this class, there would be no representation for a &quot;remote&quot; content location, i.e. a directory on the remote system</span>
+  <span class="k">class</span> <span class="nc">RemoteContentLocation</span><span class="o">&lt;</span><span class="no">ContentLocation</span>
+    <span class="c1"># the remote SshContentHost</span>
+    <span class="cn">Without this we won&#39;t know which user login on which remote server to connect to.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:contentHost</span>
+    
+    <span class="c1"># the base directory on the remote system</span>
+    <span class="cn">Without this we won&#39;t know which directory on the remote system to sync files to</span>
+    <span class="kp">attr_reader</span> <span class="ss">:baseDir</span>
+    
+    <span class="cn">Without this we wouldn&#39;t be able to create the remote content location object with read-only attributes</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">contentHost</span><span class="p">,</span> <span class="n">baseDir</span><span class="p">,</span> <span class="n">cachedContentFile</span> <span class="o">=</span> <span class="kp">nil</span><span class="p">)</span>
+      <span class="c1"># Without super, we won&#39;t remember the cached content file (if specified)</span>
+      <span class="k">super</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="c1"># Without this we won&#39;t remember which remote server to connect to</span>
+      <span class="vi">@contentHost</span> <span class="o">=</span> <span class="n">contentHost</span>
+      <span class="c1"># Without this we won&#39;t remember which directoy on the remote server to sync to.</span>
+      <span class="vi">@baseDir</span> <span class="o">=</span> <span class="n">normalisedDir</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this we won&#39;t have any way to close cached open connections (and they will leak)</span>
+    <span class="k">def</span> <span class="nf">closeConnections</span>
+      <span class="cn">Without this the cached connections won&#39;t get closed</span>
+      <span class="vi">@contentHost</span><span class="o">.</span><span class="n">closeConnections</span><span class="p">()</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># list files within the base directory on the remote contentHost</span>
+    <span class="cn">Without this we won&#39;t have an easy way to list all files in the remote directory on the remote system</span>
+    <span class="k">def</span> <span class="nf">listFiles</span><span class="p">()</span>
+      <span class="cn">Without this the files won&#39;t get listed</span>
+      <span class="n">contentHost</span><span class="o">.</span><span class="n">listFiles</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># object required to execute SCP (e.g. &quot;scp&quot; or &quot;pscp&quot;, possibly with extra args)</span>
+    <span class="cn">Without this we won&#39;t have a handle on the object used to perform SSH/SCP actions</span>
+    <span class="k">def</span> <span class="nf">sshAndScp</span>
+      <span class="k">return</span> <span class="n">contentHost</span><span class="o">.</span><span class="n">sshAndScp</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># get the full path of a relative path</span>
+    <span class="cn">Without this we won&#39;t have an easy way to get the full path of a file or directory specified relative the remote directory</span>
+    <span class="k">def</span> <span class="nf">getFullPath</span><span class="p">(</span><span class="n">relativePath</span><span class="p">)</span>
+      <span class="k">return</span> <span class="n">baseDir</span> <span class="o">+</span> <span class="n">relativePath</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># execute an SSH command on the remote host (or just pretend, if dryRun is true)</span>
+    <span class="cn">Without this we won&#39;t have a direct method to execute SSH commands on the remote server (with dry-run option)</span>
+    <span class="k">def</span> <span class="nf">ssh</span><span class="p">(</span><span class="n">commandString</span><span class="p">,</span> <span class="n">dryRun</span> <span class="o">=</span> <span class="kp">false</span><span class="p">)</span>
+      <span class="n">contentHost</span><span class="o">.</span><span class="n">sshAndScp</span><span class="o">.</span><span class="n">ssh</span><span class="p">(</span><span class="n">commandString</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># list all sub-directories of the base directory on the remote host</span>
+    <span class="cn">Without this we won&#39;t have a direct method to list all sub-directories within the remote directory</span>
+    <span class="k">def</span> <span class="nf">listDirectories</span>
+      <span class="k">return</span> <span class="n">contentHost</span><span class="o">.</span><span class="n">listDirectories</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># list all the file hashes of the files within the base directory</span>
+    <span class="cn">Without this we won&#39;t have a direct method to list files within the remote directory, together with their hashes</span>
+    <span class="k">def</span> <span class="nf">listFileHashes</span>
+      <span class="k">return</span> <span class="n">contentHost</span><span class="o">.</span><span class="n">listFileHashes</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this we won&#39;t have an easy way to present a description of this object (for tracing, feedback)</span>
+    <span class="k">def</span> <span class="nf">to_s</span>
+      <span class="k">return</span> <span class="n">contentHost</span><span class="o">.</span><span class="n">locationDescriptor</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+    <span class="k">end</span>
+
+    <span class="c1"># Get the content tree, from the cached content file if it exists, </span>
+    <span class="c1"># otherwise get if from listing directories and files and hash values thereof</span>
+    <span class="c1"># on the remote host. And also, if the cached content file name is specified, </span>
+    <span class="c1"># write the content tree out to that file.</span>
+    <span class="cn">Without this we won&#39;t have a way to get the content tree representing the contents of the remote directory, possibly using an existing cached content tree file (and if not, possibly saving a cached content tree for next time)</span>
+    <span class="k">def</span> <span class="nf">getContentTree</span>
+      <span class="cn">Without this check we would try to read the cached content file when there isn&#39;t one, or alternatively, we would retrieve the content details remotely, when we could have read them for a cached content file</span>
+      <span class="k">if</span> <span class="n">cachedContentFile</span> <span class="ow">and</span> <span class="no">File</span><span class="o">.</span><span class="n">exists?</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+        <span class="cn">Without this, the content tree won&#39;t be read from the cached content file</span>
+        <span class="k">return</span> <span class="no">ContentTree</span><span class="o">.</span><span class="n">readFromFile</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="k">else</span>
+        <span class="cn">Without this, we wouldn&#39;t retrieve the remote content details</span>
+        <span class="n">contentTree</span> <span class="o">=</span> <span class="n">contentHost</span><span class="o">.</span><span class="n">getContentTree</span><span class="p">(</span><span class="n">baseDir</span><span class="p">)</span>
+        <span class="cn">Without this, the content tree might be in an arbitrary order</span>
+        <span class="n">contentTree</span><span class="o">.</span><span class="n">sort!</span>
+        <span class="cn">Without this check, we would try to write a cached content file when no name has been specified for it</span>
+        <span class="k">if</span> <span class="n">cachedContentFile</span> <span class="o">!=</span> <span class="kp">nil</span>
+          <span class="cn">Without this, the cached content file wouldn&#39;t be updated from the most recently retrieved details</span>
+          <span class="n">contentTree</span><span class="o">.</span><span class="n">writeToFile</span><span class="p">(</span><span class="n">cachedContentFile</span><span class="p">)</span>
+        <span class="k">end</span>
+        <span class="cn">Without this, the retrieved sorted content tree won&#39;t be retrieved</span>
+        <span class="k">return</span> <span class="n">contentTree</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+  <span class="k">end</span>
+  
+  <span class="c1"># The operation of synchronising files on the remote directory with files on the local directory.</span>
+  <span class="cn">Without this class, there would be no representation of the act of syncing a local file system with a remote file system.</span>
+  <span class="k">class</span> <span class="nc">SyncOperation</span>
+    <span class="c1"># The source location (presumed to be local)</span>
+    <span class="cn">Without this, we wouldn&#39;t know where the source files are</span>
+    <span class="kp">attr_reader</span> <span class="ss">:sourceLocation</span>
+    
+    <span class="c1"># The destination location (presumed to be remote)</span>
+    <span class="cn">Without this, we wouldn&#39;t know where the destination to be synced with the source directory is.</span>
+    <span class="kp">attr_reader</span> <span class="ss">:destinationLocation</span>
+    
+    <span class="cn">Without this we wouldn&#39;t have an easy way to create the sync operation object with all attributes specified (and with read-only attributes)</span>
+    <span class="k">def</span> <span class="nf">initialize</span><span class="p">(</span><span class="n">sourceLocation</span><span class="p">,</span> <span class="n">destinationLocation</span><span class="p">)</span>
+      <span class="cn">Without this, we wouldn&#39;t remember the (local) source location</span>
+      <span class="vi">@sourceLocation</span> <span class="o">=</span> <span class="n">sourceLocation</span>
+      <span class="cn">Without this, we wouldn&#39;t remember the (remote) destination location</span>
+      <span class="vi">@destinationLocation</span> <span class="o">=</span> <span class="n">destinationLocation</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Get the local and remote content trees</span>
+    <span class="cn">Without this, we woulnd&#39;t have an way to get the source and destination content trees, which we need so that we can determine what files are present locally and remotely, and therefore which files need to be uploaded or deleted in order to sync the remote file system to the local one.</span>
+    <span class="k">def</span> <span class="nf">getContentTrees</span>
+      <span class="cn">Without this, we wouldn&#39;t get the content tree for the local source location</span>
+      <span class="vi">@sourceContent</span> <span class="o">=</span> <span class="vi">@sourceLocation</span><span class="o">.</span><span class="n">getContentTree</span><span class="p">()</span>
+      <span class="cn">Without this, we wouldn&#39;t get the content tree for the remote destination location</span>
+      <span class="vi">@destinationContent</span> <span class="o">=</span> <span class="vi">@destinationLocation</span><span class="o">.</span><span class="n">getContentTree</span><span class="p">()</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># On the local and remote content trees, mark the copy and delete operations required</span>
+    <span class="c1"># to sync the remote location to the local location.</span>
+    <span class="cn">Without this, we woundn&#39;t have an easy way to mark the content trees for operations required to perform the sync</span>
+    <span class="k">def</span> <span class="nf">markSyncOperations</span>
+      <span class="cn">Without this, the sync operations won&#39;t be marked</span>
+      <span class="vi">@sourceContent</span><span class="o">.</span><span class="n">markSyncOperationsForDestination</span><span class="p">(</span><span class="vi">@destinationContent</span><span class="p">)</span>
+      <span class="cn">Without these puts statements, the user won&#39;t receive feedback about what sync operations (i.e. copies and deletes) are marked for execution</span>
+      <span class="nb">puts</span> <span class="s2">&quot; ================================================ &quot;</span>
+      <span class="nb">puts</span> <span class="s2">&quot;After marking for sync --&quot;</span>
+      <span class="nb">puts</span> <span class="s2">&quot;&quot;</span>
+      <span class="nb">puts</span> <span class="s2">&quot;Local:&quot;</span>
+      <span class="cn">Without this, the user won&#39;t see what local files and directories are marked for copying (i.e. upload)</span>
+      <span class="vi">@sourceContent</span><span class="o">.</span><span class="n">showIndented</span><span class="p">()</span>
+      <span class="nb">puts</span> <span class="s2">&quot;&quot;</span>
+      <span class="nb">puts</span> <span class="s2">&quot;Remote:&quot;</span>
+      <span class="cn">Without this, the user won&#39;t see what remote files and directories are marked for deleting</span>
+      <span class="vi">@destinationContent</span><span class="o">.</span><span class="n">showIndented</span><span class="p">()</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Delete the local and remote cached content files (which will force a full recalculation</span>
+    <span class="c1"># of both content trees next time)</span>
+    <span class="cn">Without this, there won&#39;t be an easy way to delete all cached content files (thus forcing details for both content trees to be retrieved directly from the source &amp; destination locations)</span>
+    <span class="k">def</span> <span class="nf">clearCachedContentFiles</span>
+      <span class="cn">Without this, the (local) source cached content file won&#39;t be deleted</span>
+      <span class="vi">@sourceLocation</span><span class="o">.</span><span class="n">clearCachedContentFile</span><span class="p">()</span>
+      <span class="cn">Without this, the (remote) source cached content file won&#39;t be deleted</span>
+      <span class="vi">@destinationLocation</span><span class="o">.</span><span class="n">clearCachedContentFile</span><span class="p">()</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Do the sync. Options: :full = true means clear the cached content files first, :dryRun</span>
+    <span class="c1"># means don&#39;t do the actual copies and deletes, but just show what they would be.</span>
+    <span class="cn">Without this, there won&#39;t be a single method that can be called to do the sync operations (optionally doing a dry run)</span>
+    <span class="k">def</span> <span class="nf">doSync</span><span class="p">(</span><span class="n">options</span> <span class="o">=</span> <span class="p">{})</span>
+      <span class="cn">Without this, the content files will be cleared regardless of whether :full options is specified</span>
+      <span class="k">if</span> <span class="n">options</span><span class="o">[</span><span class="ss">:full</span><span class="o">]</span>
+        <span class="cn">Without this, the content files won&#39;t be cleared when the :full options is specified</span>
+        <span class="n">clearCachedContentFiles</span><span class="p">()</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, the required content information won&#39;t be retrieved (be it from cached content files or from the actual locations)</span>
+      <span class="n">getContentTrees</span><span class="p">()</span>
+      <span class="cn">Without this, the required copy and delete operations won&#39;t be marked for execution</span>
+      <span class="n">markSyncOperations</span><span class="p">()</span>
+      <span class="cn">Without this, we won&#39;t know if only a dry run is intended</span>
+      <span class="n">dryRun</span> <span class="o">=</span> <span class="n">options</span><span class="o">[</span><span class="ss">:dryRun</span><span class="o">]</span>
+      <span class="cn">Without this check, the destination cached content file will be cleared, even for a dry run</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+        <span class="cn">Without this check, the destination cached content file will remain there, even though it is stale once an actual (non-dry-run) sync operation is started.</span>
+        <span class="vi">@destinationLocation</span><span class="o">.</span><span class="n">clearCachedContentFile</span><span class="p">()</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, the marked copy operations will not be executed (or in the case of dry-run, they won&#39;t be echoed to the user)</span>
+      <span class="n">doAllCopyOperations</span><span class="p">(</span><span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the marked delete operations will not be executed (or in the case of dry-run, they won&#39;t be echoed to the user)</span>
+      <span class="n">doAllDeleteOperations</span><span class="p">(</span><span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this check, the destination cached content file will be updated from the source content file, even if it was only a dry-run (so the remote location hasn&#39;t actually changed)</span>
+      <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">dryRun</span> <span class="ow">and</span> <span class="vi">@destinationLocation</span><span class="o">.</span><span class="n">cachedContentFile</span> <span class="ow">and</span> <span class="vi">@sourceLocation</span><span class="o">.</span><span class="n">cachedContentFile</span> <span class="ow">and</span>
+          <span class="no">File</span><span class="o">.</span><span class="n">exists?</span><span class="p">(</span><span class="vi">@sourceLocation</span><span class="o">.</span><span class="n">cachedContentFile</span><span class="p">))</span>
+        <span class="cn">Without this, the remote cached content file won&#39;t be updated from local cached content file (which is a reasonable thing to do assuming the sync operation completed successfully)</span>
+        <span class="no">FileUtils</span><span class="o">::</span><span class="no">Verbose</span><span class="o">.</span><span class="n">cp</span><span class="p">(</span><span class="vi">@sourceLocation</span><span class="o">.</span><span class="n">cachedContentFile</span><span class="p">,</span> <span class="vi">@destinationLocation</span><span class="o">.</span><span class="n">cachedContentFile</span><span class="p">)</span>
+      <span class="k">end</span>
+      <span class="cn">Without this, any cached SSH connections will remain unclosed (until the calling application has terminated, which may or may not happen soon after completing the sync).</span>
+      <span class="n">closeConnections</span><span class="p">()</span>
+    <span class="k">end</span>
+
+    <span class="c1"># Do all the copy operations, copying local directories or files which are missing from the remote location</span>
+    <span class="cn">Without this, there won&#39;t be an easy way to execute (or echo if dry-run) all the marked copy operations</span>
+    <span class="k">def</span> <span class="nf">doAllCopyOperations</span><span class="p">(</span><span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the copy operations won&#39;t be executed</span>
+      <span class="n">doCopyOperations</span><span class="p">(</span><span class="vi">@sourceContent</span><span class="p">,</span> <span class="vi">@destinationContent</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Do all delete operations, deleting remote directories or files which do not exist at the local location</span>
+    <span class="cn">Without this, there won&#39;t be an easy way to execute (or echo if dry-run) all the marked delete operations</span>
+    <span class="k">def</span> <span class="nf">doAllDeleteOperations</span><span class="p">(</span><span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the delete operations won&#39;t be executed</span>
+      <span class="n">doDeleteOperations</span><span class="p">(</span><span class="vi">@destinationContent</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Execute a (local) command, or, if dryRun, just pretend to execute it.</span>
+    <span class="c1"># Raise an exception if the process exit status is not 0.</span>
+    <span class="cn">Without this, there won&#39;t be an easy way to execute a local command, echoing it to the user, and optionally _not_ executing it if &quot;dry run&quot; is specified</span>
+    <span class="k">def</span> <span class="nf">executeCommand</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this, the command won&#39;t be echoed to the user</span>
+      <span class="nb">puts</span> <span class="s2">&quot;EXECUTE: </span><span class="si">#{</span><span class="n">command</span><span class="si">}</span><span class="s2">&quot;</span>
+      <span class="cn">Without this check, the command will be executed, even though it is intended to be a dry run</span>
+      <span class="k">if</span> <span class="ow">not</span> <span class="n">dryRun</span>
+        <span class="cn">Without this, the command won&#39;t be executed (when it&#39;s not a dry run)</span>
+        <span class="nb">system</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+        <span class="cn">Without this, a command that fails with error will be assumed to have completed successfully (which will result in incorrect assumptions in some cases about what has changed as a result of the command, e.g. apparently successful execution of sync commands would result in the assumption that the remote directory now matches the local directory)</span>
+        <span class="n">checkProcessStatus</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Recursively perform all marked copy operations from the source content tree to the</span>
+    <span class="c1"># destination content tree, or if dryRun, just pretend to perform them.</span>
+    <span class="cn">Without this, there wouldn&#39;t be a way to copy files marked for copying in a source content tree to a destination content tree (or optionally do a dry run)</span>
+    <span class="k">def</span> <span class="nf">doCopyOperations</span><span class="p">(</span><span class="n">sourceContent</span><span class="p">,</span> <span class="n">destinationContent</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this loop, we won&#39;t copy the directories that are marked for copying</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">sourceContent</span><span class="o">.</span><span class="n">dirs</span>
+        <span class="cn">Without this check, we would attempt to copy those directories _not_ marked for copying (but which might still have sub-directories marked for copying)</span>
+        <span class="k">if</span> <span class="n">dir</span><span class="o">.</span><span class="n">copyDestination</span> <span class="o">!=</span> <span class="kp">nil</span>
+          <span class="cn">Without this, we won&#39;t know what is the full path of the local source directory to be copied</span>
+          <span class="n">sourcePath</span> <span class="o">=</span> <span class="n">sourceLocation</span><span class="o">.</span><span class="n">getFullPath</span><span class="p">(</span><span class="n">dir</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+          <span class="cn">Without this, we won&#39;t know the full path of the remote destination directory that this source directory is to be copied into</span>
+          <span class="n">destinationPath</span> <span class="o">=</span> <span class="n">destinationLocation</span><span class="o">.</span><span class="n">getFullPath</span><span class="p">(</span><span class="n">dir</span><span class="o">.</span><span class="n">copyDestination</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+          <span class="cn">Without this, the source directory won&#39;t actually get copied</span>
+          <span class="n">destinationLocation</span><span class="o">.</span><span class="n">contentHost</span><span class="o">.</span><span class="n">copyLocalToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+        <span class="k">else</span>
+          <span class="cn">Without this, we wouldn&#39;t copy sub-directories marked for copying of this sub-directory (which is not marked for copying in full)</span>
+          <span class="n">doCopyOperations</span><span class="p">(</span><span class="n">dir</span><span class="p">,</span> <span class="n">destinationContent</span><span class="o">.</span><span class="n">getDir</span><span class="p">(</span><span class="n">dir</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="n">dryRun</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="cn">Without this loop, we won&#39;t copy the files that are marked for copying</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="n">sourceContent</span><span class="o">.</span><span class="n">files</span>
+        <span class="cn">Without this check, we would attempt to copy those files _not_ marked for copying</span>
+        <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">copyDestination</span> <span class="o">!=</span> <span class="kp">nil</span>
+          <span class="cn">Without this, we won&#39;t know what is the full path of the local file to be copied</span>
+          <span class="n">sourcePath</span> <span class="o">=</span> <span class="n">sourceLocation</span><span class="o">.</span><span class="n">getFullPath</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+          <span class="cn">Without this, we won&#39;t know the full path of the remote destination directory that this source directory is to be copied into</span>
+          <span class="n">destinationPath</span> <span class="o">=</span> <span class="n">destinationLocation</span><span class="o">.</span><span class="n">getFullPath</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">copyDestination</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+          <span class="cn">Without this, the file won&#39;t actually get copied</span>
+          <span class="n">destinationLocation</span><span class="o">.</span><span class="n">contentHost</span><span class="o">.</span><span class="n">copyLocalFileToRemoteDirectory</span><span class="p">(</span><span class="n">sourcePath</span><span class="p">,</span> <span class="n">destinationPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="c1"># Recursively perform all marked delete operations on the destination content tree, </span>
+    <span class="c1"># or if dryRun, just pretend to perform them.</span>
+    <span class="cn">Without this, we wouldn&#39;t have a way to delete files and directories in the remote destination directory which have been marked for deletion (optionally doing it dry run only)</span>
+    <span class="k">def</span> <span class="nf">doDeleteOperations</span><span class="p">(</span><span class="n">destinationContent</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+      <span class="cn">Without this loop, we won&#39;t delete all sub-directories or files and directories within sub-directories which have been marked for deletion</span>
+      <span class="k">for</span> <span class="n">dir</span> <span class="k">in</span> <span class="n">destinationContent</span><span class="o">.</span><span class="n">dirs</span>
+        <span class="cn">Without this check, we would delete directories which have not been marked for deletion (which would be incorrect)</span>
+        <span class="k">if</span> <span class="n">dir</span><span class="o">.</span><span class="n">toBeDeleted</span>
+          <span class="cn">Without this, we won&#39;t know the full path of the remote directory to be deleted</span>
+          <span class="n">dirPath</span> <span class="o">=</span> <span class="n">destinationLocation</span><span class="o">.</span><span class="n">getFullPath</span><span class="p">(</span><span class="n">dir</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+          <span class="cn">Without this, the remote directory marked for deletion won&#39;t get deleted</span>
+          <span class="n">destinationLocation</span><span class="o">.</span><span class="n">contentHost</span><span class="o">.</span><span class="n">deleteDirectory</span><span class="p">(</span><span class="n">dirPath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+        <span class="k">else</span>
+          <span class="cn">Without this, files and sub-directories within this sub-directory which are marked for deletion (even though the sub-directory as a whole hasn&#39;t been marked for deletion) won&#39;t get deleted.</span>
+          <span class="n">doDeleteOperations</span><span class="p">(</span><span class="n">dir</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="cn">Without this loop, we won&#39;t delete files within this directory which have been marked for deletion.</span>
+      <span class="k">for</span> <span class="n">file</span> <span class="k">in</span> <span class="n">destinationContent</span><span class="o">.</span><span class="n">files</span>
+        <span class="cn">Without this check, we would delete this file even though it&#39;s not marked for deletion (and therefore should not be deleted)</span>
+        <span class="k">if</span> <span class="n">file</span><span class="o">.</span><span class="n">toBeDeleted</span>
+          <span class="cn">Without this, we won&#39;t know the full path of the file to be deleted</span>
+          <span class="n">filePath</span> <span class="o">=</span> <span class="n">destinationLocation</span><span class="o">.</span><span class="n">getFullPath</span><span class="p">(</span><span class="n">file</span><span class="o">.</span><span class="n">relativePath</span><span class="p">)</span>
+          <span class="cn">Without this, the file won&#39;t actually get deleted</span>
+          <span class="n">destinationLocation</span><span class="o">.</span><span class="n">contentHost</span><span class="o">.</span><span class="n">deleteFile</span><span class="p">(</span><span class="n">filePath</span><span class="p">,</span> <span class="n">dryRun</span><span class="p">)</span>
+        <span class="k">end</span>
+      <span class="k">end</span>
+    <span class="k">end</span>
+    
+    <span class="cn">Without this there won&#39;t be any easy way to close cached SSH connections once the sync operations are all finished (and if we closed the connections as soon as we had finished with them, then we wouldn&#39;t be able to cache them)</span>
+    <span class="k">def</span> <span class="nf">closeConnections</span>
+      <span class="cn">Without this, cached SSH connections to the remote system won&#39;t get closed</span>
+      <span class="n">destinationLocation</span><span class="o">.</span><span class="n">closeConnections</span><span class="p">()</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+</pre></div>
+</html>
