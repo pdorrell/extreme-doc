@@ -18,11 +18,30 @@ class RelabelNegativeCommentsFilter(Filter):
                 
 class HtmlPageFormatter(HtmlFormatter):
     
+    def __init__(self, **options):
+        HtmlFormatter.__init__(self, **options)
+    
     def htmlStart(self):
-        return "<!DOCTYPE html><html>\n"
+        return """%s
+<html>
+<head>
+<title>%s</title>
+%s
+<body>
+""" % (self.htmlDocType(), self.title, self.cssIncludes())
+    
+    def cssIncludes(self):
+        return "\n".join(["<link href = \"%s\" type = \"text/css\" rel = \"stylesheet\"/>" % cssFile 
+                          for cssFile in self.cssFiles()])
+    
+    def cssFiles(self):
+        return ["default.css"]
+    
+    def htmlDocType(self):
+        return "<!DOCTYPE html>"
     
     def htmlEnd(self):
-        return "</html>\n"
+        return "</body></html>\n"
     
     def format_unencoded(self, tokensource, outfile):
         outfile.write(self.htmlStart())
@@ -33,7 +52,7 @@ def main(inputFileName):
     outputFileName = "%s.html" % inputFileName
     rubyLexer = RubyLexer()
     rubyLexer.add_filter(RelabelNegativeCommentsFilter())
-    htmlPageFormatter = HtmlPageFormatter()
+    htmlPageFormatter = HtmlPageFormatter(title = inputFileName)
     
     inputFile = open(inputFileName, "r")
     code = inputFile.read()
