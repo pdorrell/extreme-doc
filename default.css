@@ -8,7 +8,6 @@ body .err { border: 1px solid #FF0000 } /* Error */
 body .k { color: #008000; font-weight: bold } /* Keyword */
 body .o { color: #666666 } /* Operator */
 body .cm { color: #408080; font-style: italic } /* Comment.Multiline */
-body .cn { color: #408080; font-style: italic } /* Comment.Negative */
 body .cp { color: #BC7A00 } /* Comment.Preproc */
 body .c1 { color: #408080; font-style: italic } /* Comment.Single */
 body .cs { color: #408080; font-style: italic } /* Comment.Special */

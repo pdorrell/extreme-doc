@@ -35,7 +35,7 @@ class HtmlPageFormatter(HtmlFormatter):
                           for cssFile in self.cssFiles()])
     
     def cssFiles(self):
-        return ["default.css"]
+        return ["default.css", "extreme-doc.css"]
     
     def htmlDocType(self):
         return "<!DOCTYPE html>"
