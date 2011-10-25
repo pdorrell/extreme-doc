@@ -4,8 +4,15 @@ from pygments.lexers import RubyLexer
 from pygments.token import Token, STANDARD_TYPES
 from pygments.formatters import HtmlFormatter
 
+import os
+from urllib.request import urlopen
 
 STANDARD_TYPES[Token.Comment.Negative] = "cn"
+
+JSQUERY_VERSION = "1.6.4"
+JSQUERY_URL = "http://ajax.googleapis.com/ajax/libs/jquery/%s/jquery.min.js" % JSQUERY_VERSION
+JSQUERY_FILENAME = "jquery.min.%s.js" % JSQUERY_VERSION
+JSQUERY_FILE_LOCATION = "js/%s" % JSQUERY_FILENAME
 
 class RelabelNegativeCommentsFilter(Filter):
     def filter (self, lexer, stream):
@@ -27,15 +34,23 @@ class HtmlPageFormatter(HtmlFormatter):
 <head>
 <title>%s</title>
 %s
+%s
 <body>
-""" % (self.htmlDocType(), self.title, self.cssIncludes())
+""" % (self.htmlDocType(), self.title, self.cssIncludes(), self.javascriptIncludes())
     
     def cssIncludes(self):
         return "\n".join(["<link href = \"%s\" type = \"text/css\" rel = \"stylesheet\"/>" % cssFile 
                           for cssFile in self.cssFiles()])
     
+    def javascriptIncludes(self):
+        return "\n".join(["<script src=\"%s\" type=\"text/javascript\"></script>" % javascriptFile
+                          for javascriptFile in self.javascriptFiles()])
+    
     def cssFiles(self):
         return ["default.css", "extreme-doc.css"]
+    
+    def javascriptFiles(self):
+        return [JSQUERY_FILE_LOCATION]
     
     def htmlDocType(self):
         return "<!DOCTYPE html>"
@@ -48,7 +63,20 @@ class HtmlPageFormatter(HtmlFormatter):
         HtmlFormatter.format_unencoded(self, tokensource, outfile)
         outfile.write(self.htmlEnd())
 
+def downloadUrlToFile(url, fileName, clobberIfThere = False):
+    print("Downloading %s to %s ..." % (url, fileName))
+    if clobberIfThere or not os.path.exists(fileName):
+        webFile = urlopen(url)
+        localFile = open(fileName, 'wb')
+        localFile.write(webFile.read())
+        webFile.close()
+        localFile.close()
+        print(" downloaded.")
+    else:
+        print (" not replacing existing file %s" % fileName)
+    
 def main(inputFileName):
+    
     outputFileName = "%s.html" % inputFileName
     rubyLexer = RubyLexer()
     rubyLexer.add_filter(RelabelNegativeCommentsFilter())
@@ -66,5 +94,6 @@ def main(inputFileName):
     outputFile.close()
 
 if __name__ == "__main__":
+    downloadUrlToFile (JSQUERY_URL, JSQUERY_FILE_LOCATION, clobberIfThere = False)
     inputFileName = "synqa.rb"
     main(inputFileName)
