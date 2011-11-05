@@ -50,7 +50,7 @@ class HtmlPageFormatter(HtmlFormatter):
         return ["default.css", "extreme-doc.css"]
     
     def javascriptFiles(self):
-        return [JSQUERY_FILE_LOCATION]
+        return [JSQUERY_FILE_LOCATION, "extreme-doc.js"]
     
     def htmlDocType(self):
         return "<!DOCTYPE html>"
