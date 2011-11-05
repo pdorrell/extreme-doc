@@ -1,3 +1,7 @@
 
-body .cnHide { visibility: none;} /* hidden Comment.Negative */
-body .cnShow { color: #a0a0ff; font-size: 0.7em; } /* displayed Comment.Negative */
+body .cn { color: #f0f0f0; font-size: 0.8em;} /* Comment.Negative */
+
+span.showNegatives { 
+    font-family: 'Arial','sans'; font-size: 0.6em; color: #333;
+    border: solid 1pt #aaa; padding: 0.2em; 
+}

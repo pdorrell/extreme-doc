@@ -1,20 +1,19 @@
 $(document).ready(function() {
-    // alert("Hello world from extreme-doc.js");
-    $(".cn").addClass("cnHide");
     addHideShowCheckbox();
+    showOrHideNegativeComments(false);
   });
 
+function showOrHideNegativeComments(show) {
+  var colorProperty =  show ? "#b0b0b0" : "#ffffff";
+
+  var visibilityProperty =  show ? "visible" : "hidden";
+  $(".cn").css("color", colorProperty);
+  $(".cn").css("visibility", visibilityProperty);
+}
+
 function addHideShowCheckbox() {
-  $("body").prepend("<div>Show negative comments<input id = 'showNegatives' type = 'checkbox'></div>");
+  $("body").prepend("<div><span class = 'showNegatives'>Show negative comments<input id = 'showNegatives' type = 'checkbox'></span></div>");
   $("#showNegatives").change(function(event) {
-      if (event.target.checked) {
-        $(".cn").addClass("cnShow");
-        $(".cn").removeClass("cnHide");
-      }
-      else {
-        $(".cn").addClass("cnHide");
-        $(".cn").removeClass("cnShow");
-      }
+      showOrHideNegativeComments(event.target.checked);
     });
-        
 }
