@@ -6,6 +6,7 @@ from pygments.formatters import HtmlFormatter
 
 import os
 from urllib.request import urlopen
+from io import StringIO
 
 STANDARD_TYPES[Token.Comment.Negative] = "cn"
 
@@ -60,7 +61,11 @@ class HtmlPageFormatter(HtmlFormatter):
     
     def format_unencoded(self, tokensource, outfile):
         outfile.write(self.htmlStart())
-        HtmlFormatter.format_unencoded(self, tokensource, outfile)
+        stringBuffer = StringIO()
+        HtmlFormatter.format_unencoded(self, tokensource, stringBuffer)
+        highlightedHtml = stringBuffer.getvalue()
+        outfile.write(highlightedHtml)
+        stringBuffer.close()
         outfile.write(self.htmlEnd())
 
 def downloadUrlToFile(url, fileName, clobberIfThere = False):
