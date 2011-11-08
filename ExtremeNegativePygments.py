@@ -58,13 +58,36 @@ class HtmlPageFormatter(HtmlFormatter):
     
     def htmlEnd(self):
         return "</body></html>\n"
+
+    emptyLineRegex = re.compile(r'^(\s*)$')
+    cnLineRegex = re.compile(r'^(\s*)(<span class="cn">(.*))$')
+    lineRegex = re.compile(r'^(\s*)(<span class="(.*))$')
     
+    codeLineTemplate = "<div class=\"%s\"><code>%s%s</code></div>"
+    
+    def taggedCodeLine(self, indentWhitespace, line, tag):
+        return HtmlPageFormatter.codeLineTemplate % (tag, 
+                                                     indentWhitespace.replace(" ", "&nbsp"), 
+                                                     line)
+    
+    def divifiedSpanLine(self, spanLine):
+        match = HtmlPageFormatter.cnLineRegex.match(spanLine)
+        if match:
+            return self.taggedCodeLine(match.group(1), match.group(2), "cn-line")
+        else:
+            match = HtmlPageFormatter.emptyLineRegex.match(spanLine)
+            if match:
+                return self.taggedCodeLine(match.group(1), "", "line")
+            else:
+                match = HtmlPageFormatter.lineRegex.match(spanLine)
+                if match:
+                    return self.taggedCodeLine(match.group(1), match.group(2), "line")
+                else:
+                    raise Exception("Unexpected pygments line: %r" % spanLine)
+
     firstLineRegex = re.compile(r'^(<div.*)<pre>(.*)$')
     
     lastLineRegex = re.compile(r'^(.*)</pre>(</div>)$')
-    
-    def divifiedSpanLine(self, spanLine):
-        return spanLine
     
     def writeDivifiedHtml(self, spannedHtml, outfile):
         lines = spannedHtml.split("\n")
@@ -74,13 +97,13 @@ class HtmlPageFormatter(HtmlFormatter):
 
         firstLineMatch = HtmlPageFormatter.firstLineRegex.match(firstLine)
         if firstLineMatch:
-            outfile.write("%s<pre>\n" % firstLineMatch.group(1))
+            outfile.write("%s\n" % firstLineMatch.group(1))
             outfile.write("%s\n" % self.divifiedSpanLine(firstLineMatch.group(2)))
         else:
-            raise Error("First line %r does not match expected pattern" % firstLine)
+            raise Exception("First line %r does not match expected pattern" % firstLine)
         
         for i in range(1, len(lines)-2):
-            print(" line %r" % lines[i])
+            #print(" line %r" % lines[i])
             outfile.write("%s\n" % self.divifiedSpanLine(lines[i]))
             
         lastLine = lines[-2]
@@ -88,8 +111,8 @@ class HtmlPageFormatter(HtmlFormatter):
         
         lastLineMatch = HtmlPageFormatter.lastLineRegex.match(lastLine)
         if lastLineMatch:
-            outfile.write("%s\n" % lastLineMatch.group(1))
-            outfile.write("<\pre>%s\n" % self.divifiedSpanLine(lastLineMatch.group(2)))
+            outfile.write("%s\n" % self.divifiedSpanLine(lastLineMatch.group(1)))
+            outfile.write("%s\n" % lastLineMatch.group(2))
         else:
             raise Error("Last line %r does not match expected pattern" % lastLine)
             
