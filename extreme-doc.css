@@ -1,7 +1,7 @@
 
-body .cn { color: #f0f0f0; } /* Comment.Negative */
+body .cn { color: #e0e0e0; } /* Comment.Negative */
 
-.cn-line {font-size: 0.8em}
+.cn-line {font-size: 0.9em; display: "none"; }
 
 span.showNegatives { 
     font-family: 'Arial','sans'; font-size: 0.6em; color: #333;
