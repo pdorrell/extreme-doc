@@ -4,10 +4,8 @@ $(document).ready(function() {
   });
 
 function showOrHideNegativeComments(show) {
-  var colorProperty =  show ? "#b0b0b0" : "#ffffff";
   var visibilityProperty =  show ? "visible" : "hidden";
   var displayProperty = show ? "block" : "none";
-  //$(".cn").css("color", colorProperty);
   $(".cn").css("visibility", visibilityProperty);
   $(".cn-line").css("display", displayProperty);
 }
