@@ -4,11 +4,10 @@ $(document).ready(function() {
   });
 
 function showOrHideNegativeComments(show) {
-  var colorProperty =  show ? "#b0b0b0" : "#ffffff";
-
   var visibilityProperty =  show ? "visible" : "hidden";
-  $(".cn").css("color", colorProperty);
+  var displayProperty = show ? "block" : "none";
   $(".cn").css("visibility", visibilityProperty);
+  $(".cn-line").css("display", displayProperty);
 }
 
 function addHideShowCheckbox() {

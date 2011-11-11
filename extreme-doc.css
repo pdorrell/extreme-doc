@@ -1,5 +1,9 @@
 
-body .cn { color: #f0f0f0; font-size: 0.8em;} /* Comment.Negative */
+body .cn:hover { color : #101010; background-color : #f0f000; }
+
+body .cn { color: #c0c0c0; font-family: "Times Roman",serif; padding: 0.1em; margin: 0;} /* Comment.Negative */
+
+.cn-line {font-size: 1.0em; display: "none"; padding: 0; margin: 0;}
 
 span.showNegatives { 
     font-family: 'Arial','sans'; font-size: 0.6em; color: #333;
