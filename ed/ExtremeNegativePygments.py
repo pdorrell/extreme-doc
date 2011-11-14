@@ -1,35 +1,59 @@
+#E pygments.highlight is the main function in pygments to generate a highlighted version of a source file
 from pygments import highlight
+#E pygments.filter.Filter is the base class for pygments filters, to process a stream of token-string pairs to generate a new stream of token-string pairs
 from pygments.filter import Filter
+#E RubyLexer is the pygments lexer which knows how to parse a Ruby source file (to generate a stream of token-string pairs)
 from pygments.lexers import RubyLexer
-from pygments.token import Token, STANDARD_TYPES
+#E Token is the base class for token type objects, STANDARD_TYPES is 
+from pygments.token import Token, STANDARD_TYPES is the mapping from token to CSS class
+#E HtmlFormatter is the formatter that knows how to output to HTML (and which gets sub-classed here)
 from pygments.formatters import HtmlFormatter
-
+#E os for path.exists, re for regular expressions used to parse output of HtmlFormatter (so we can post-process it)
 import os, re
+#E urlopen, to download a google-provided version of jquery
 from urllib.request import urlopen
+#E StringIO, to convert output of "write" call into a string
 from io import StringIO
 
+#E Here we implicitly define Token.Comment.Negative (because that's how pygment Tokens work), and set it's CSS class to "cn"
 STANDARD_TYPES[Token.Comment.Negative] = "cn"
 
+#E Current version of JQuery that we use
 JSQUERY_VERSION = "1.6.4"
+#E URL for downloading specified version of JQuery (just to avoid including it in the project)
 JSQUERY_URL = "http://ajax.googleapis.com/ajax/libs/jquery/%s/jquery.min.js" % JSQUERY_VERSION
+#E Construct name of local copy of JQuery file (so different versions can co-exist, and don't get confused)
 JSQUERY_FILENAME = "jquery.min.%s.js" % JSQUERY_VERSION
+#E Location of local copy of JQuery file, also it's relative URL to generated HTML file
 JSQUERY_FILE_LOCATION = "js/%s" % JSQUERY_FILENAME
 
+#E A pygments filter which will relabel comments starting with ("#N ") as being of type Token.Comment.Negative
 class RelabelNegativeCommentsFilter(Filter):
+    #E The Filter.filter method, as required to be overridden
     def filter (self, lexer, stream):
+        #E iterate over all incoming token/String pairs
         for ttype, value in stream:
+            #E If it's a "single" comment (i.e. not multi-line) and starts with "#N "
             if ttype == Token.Comment.Single and value.startswith("#N "):
+                #E Replace it with Token.Comment.Negative, and trim the initial "#N " 
                 yield Token.Comment.Negative, value[3:]
             else:
                 #print(" ttype = %s, value = %r" % (ttype, value))
+                #E Otherwise pass the token/String pair through as is
                 yield ttype, value
                 
+# A sub-class of HtmlFormatter, which adds its own header/footer, and which post-processes the highlighted code
+# (HtmlFormatter has a header, but it doesn't have enough options for what we want)
 class HtmlPageFormatter(HtmlFormatter):
     
+    #E Construct with same options as allowed for HtmlFormatter
     def __init__(self, **options):
+        #E Invoke the HtmlFormatter constructor with the same options
         HtmlFormatter.__init__(self, **options)
     
+    #E Method to output the HTML header for the page
     def htmlStart(self):
+        #E Output the HTML header for the page
         return """%s
 <html>
 <head>
@@ -39,6 +63,7 @@ class HtmlPageFormatter(HtmlFormatter):
 <body>
 """ % (self.htmlDocType(), self.title, self.cssIncludes(), self.javascriptIncludes())
     
+    #
     def cssIncludes(self):
         return "\n".join(["<link href = \"%s\" type = \"text/css\" rel = \"stylesheet\"/>" % cssFile 
                           for cssFile in self.cssFiles()])
