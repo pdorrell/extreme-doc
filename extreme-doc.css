@@ -1,11 +1,13 @@
 
-body .cn:hover { color : #101010; background-color : #f0f000; }
+body .cn:hover, body .ce:hover { color : #101010; background-color : #f0f000; }
 
 body .cn { color: #c0c0c0; font-family: "Times Roman",serif; padding: 0.1em; margin: 0;} /* Comment.Negative */
+body .ce { color: #a0c0f0; font-family: "Times Roman",serif; padding: 0.1em; margin: 0;} /* Comment.Extreme */
 
-.cn-line {font-size: 1.0em; display: "none"; padding: 0; margin: 0;}
+.cn-line, .ce-line {font-size: 1.0em; display: "none"; padding: 0; margin: 0;}
 
-span.showNegatives { 
+.showCommentsCheckboxes {
     font-family: 'Arial','sans'; font-size: 0.6em; color: #333;
     border: solid 1pt #aaa; padding: 0.2em; 
 }
+

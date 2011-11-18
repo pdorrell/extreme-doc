@@ -9,6 +9,7 @@ from urllib.request import urlopen
 from io import StringIO
 
 STANDARD_TYPES[Token.Comment.Negative] = "cn"
+STANDARD_TYPES[Token.Comment.Extreme] = "ce"
 
 JSQUERY_VERSION = "1.6.4"
 JSQUERY_URL = "http://ajax.googleapis.com/ajax/libs/jquery/%s/jquery.min.js" % JSQUERY_VERSION
@@ -18,8 +19,13 @@ JSQUERY_FILE_LOCATION = "js/%s" % JSQUERY_FILENAME
 class RelabelNegativeCommentsFilter(Filter):
     def filter (self, lexer, stream):
         for ttype, value in stream:
-            if ttype == Token.Comment.Single and value.startswith("#N "):
-                yield Token.Comment.Negative, value[3:]
+            if ttype == Token.Comment.Single:
+                if value.startswith("#N "):
+                    yield Token.Comment.Negative, value[3:]
+                elif value.startswith ("#E "):
+                    yield Token.Comment.Extreme, value[3:]
+                else:
+                    yield ttype, value
             else:
                 #print(" ttype = %s, value = %r" % (ttype, value))
                 yield ttype, value
@@ -28,6 +34,7 @@ class HtmlPageFormatter(HtmlFormatter):
     
     def __init__(self, **options):
         HtmlFormatter.__init__(self, **options)
+        self.relativeBaseDir = options.get("relativeBaseDir", "")
     
     def htmlStart(self):
         return """%s
@@ -40,11 +47,13 @@ class HtmlPageFormatter(HtmlFormatter):
 """ % (self.htmlDocType(), self.title, self.cssIncludes(), self.javascriptIncludes())
     
     def cssIncludes(self):
-        return "\n".join(["<link href = \"%s\" type = \"text/css\" rel = \"stylesheet\"/>" % cssFile 
+        return "\n".join(["<link href = \"%s%s\" type = \"text/css\" rel = \"stylesheet\"/>" 
+                          % (self.relativeBaseDir, cssFile)
                           for cssFile in self.cssFiles()])
     
     def javascriptIncludes(self):
-        return "\n".join(["<script src=\"%s\" type=\"text/javascript\"></script>" % javascriptFile
+        return "\n".join(["<script src=\"%s%s\" type=\"text/javascript\"></script>" % 
+                          (self.relativeBaseDir, javascriptFile)
                           for javascriptFile in self.javascriptFiles()])
     
     def cssFiles(self):
@@ -60,7 +69,7 @@ class HtmlPageFormatter(HtmlFormatter):
         return "</body></html>\n"
 
     emptyLineRegex = re.compile(r'^(\s*)$')
-    cnLineRegex = re.compile(r'^(\s*)(<span class="cn">(.*))$')
+    cLineRegex = re.compile(r'^(\s*)(<span class="(c[ne])">(.*))$')
     lineRegex = re.compile(r'^(\s*)(<span class="(.*))$')
     
     codeLineTemplate = "<div class=\"%s\"><code>%s%s</code></div>"
@@ -71,9 +80,9 @@ class HtmlPageFormatter(HtmlFormatter):
                                                      line)
     
     def divifiedSpanLine(self, spanLine):
-        match = HtmlPageFormatter.cnLineRegex.match(spanLine)
+        match = HtmlPageFormatter.cLineRegex.match(spanLine)
         if match:
-            return self.taggedCodeLine(match.group(1), match.group(2), "cn-line")
+            return self.taggedCodeLine(match.group(1), match.group(2), "%s-line" % match.group(3))
         else:
             match = HtmlPageFormatter.emptyLineRegex.match(spanLine)
             if match:
@@ -141,12 +150,12 @@ def downloadUrlToFile(url, fileName, clobberIfThere = False):
     else:
         print (" not replacing existing file %s" % fileName)
     
-def main(inputFileName):
+def process(inputFileName, relativeBaseDir = ""):
     
     outputFileName = "%s.html" % inputFileName
     rubyLexer = RubyLexer()
     rubyLexer.add_filter(RelabelNegativeCommentsFilter())
-    htmlPageFormatter = HtmlPageFormatter(title = inputFileName)
+    htmlPageFormatter = HtmlPageFormatter(title = inputFileName, relativeBaseDir = relativeBaseDir)
     
     inputFile = open(inputFileName, "r")
     code = inputFile.read()
@@ -158,8 +167,13 @@ def main(inputFileName):
     
     highlight(code, rubyLexer, htmlPageFormatter, outfile = outputFile)
     outputFile.close()
+    
+def main():
+    downloadUrlToFile (JSQUERY_URL, JSQUERY_FILE_LOCATION, clobberIfThere = False)
+    #inputFileName = "synqa.rb"
+    inputFileName = "ed/ExtremeNegativePygments.py"
+    process(inputFileName, "../")
 
 if __name__ == "__main__":
-    downloadUrlToFile (JSQUERY_URL, JSQUERY_FILE_LOCATION, clobberIfThere = False)
-    inputFileName = "synqa.rb"
-    main(inputFileName)
+    main()
+    

@@ -1,6 +1,7 @@
 $(document).ready(function() {
-    addHideShowCheckbox();
+    addHideShowCheckboxes();
     setNegativeCommentsVisible(false);
+    setExtremeCommentsVisible(false);
   });
 
 function setNegativeCommentsVisible(visible) {
@@ -8,9 +9,21 @@ function setNegativeCommentsVisible(visible) {
   $(".cn-line").css("display", displayProperty);
 }
 
-function addHideShowCheckbox() {
-  $("body").prepend("<div><span class = 'showNegatives'>Show negative comments<input id = 'showNegatives' type = 'checkbox'></span></div>");
+function setExtremeCommentsVisible(visible) {
+  var displayProperty = visible ? "block" : "none";
+  $(".ce-line").css("display", displayProperty);
+}
+
+function addHideShowCheckboxes() {
+  $("body").prepend("<div><span class = 'showCommentsCheckboxes'>" + 
+                    "<span class = 'checkbox'>Show negative comments<input id = 'showNegatives' type = 'checkbox'>" + 
+                    "</span>" + 
+                    "<span class = 'checkbox'>Show extreme comments<input id = 'showExtremes' type = 'checkbox'>" + 
+                    "</span></span></div>");
   $("#showNegatives").change(function(event) {
       setNegativeCommentsVisible(event.target.checked);
+    });
+  $("#showExtremes").change(function(event) {
+      setExtremeCommentsVisible(event.target.checked);
     });
 }
