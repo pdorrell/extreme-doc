@@ -16,7 +16,7 @@ JSQUERY_URL = "http://ajax.googleapis.com/ajax/libs/jquery/%s/jquery.min.js" % J
 JSQUERY_FILENAME = "jquery.min.%s.js" % JSQUERY_VERSION
 JSQUERY_FILE_LOCATION = "js/%s" % JSQUERY_FILENAME
 
-class RelabelNegativeCommentsFilter(Filter):
+class RelabelExtremeCommentsFilter(Filter):
     def filter (self, lexer, stream):
         for ttype, value in stream:
             if ttype == Token.Comment.Single:
@@ -154,7 +154,7 @@ def process(inputFileName, relativeBaseDir = ""):
     
     outputFileName = "%s.html" % inputFileName
     rubyLexer = RubyLexer()
-    rubyLexer.add_filter(RelabelNegativeCommentsFilter())
+    rubyLexer.add_filter(RelabelExtremeCommentsFilter())
     htmlPageFormatter = HtmlPageFormatter(title = inputFileName, relativeBaseDir = relativeBaseDir)
     
     inputFile = open(inputFileName, "r")
@@ -171,7 +171,7 @@ def process(inputFileName, relativeBaseDir = ""):
 def main():
     downloadUrlToFile (JSQUERY_URL, JSQUERY_FILE_LOCATION, clobberIfThere = False)
     #inputFileName = "synqa.rb"
-    inputFileName = "ed/ExtremeNegativePygments.py"
+    inputFileName = "ed/ExtremeDocHighlighting.py"
     process(inputFileName, "../")
 
 if __name__ == "__main__":
