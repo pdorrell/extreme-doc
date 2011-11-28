@@ -4,8 +4,8 @@ from pygments import highlight
 from pygments.filter import Filter
 #E RubyLexer is the pygments lexer which knows how to parse a Ruby source file (to generate a stream of token-string pairs)
 from pygments.lexers import RubyLexer
-#E Token is the base class for token type objects, STANDARD_TYPES is 
-from pygments.token import Token, STANDARD_TYPES is the mapping from token to CSS class
+#E Token is the base class for token type objects, STANDARD_TYPES is the mapping from token to CSS class
+from pygments.token import Token, STANDARD_TYPES
 #E HtmlFormatter is the formatter that knows how to output to HTML (and which gets sub-classed here)
 from pygments.formatters import HtmlFormatter
 #E os for path.exists, re for regular expressions used to parse output of HtmlFormatter (so we can post-process it)

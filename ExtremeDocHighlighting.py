@@ -30,6 +30,8 @@ class RelabelExtremeCommentsFilter(Filter):
                 #print(" ttype = %s, value = %r" % (ttype, value))
                 yield ttype, value
                 
+# A sub-class of HtmlFormatter, which adds its own header/footer, and which post-processes the highlighted code
+# (HtmlFormatter has a header, but it doesn't have enough options for what we want)
 class HtmlPageFormatter(HtmlFormatter):
     
     def __init__(self, **options):
