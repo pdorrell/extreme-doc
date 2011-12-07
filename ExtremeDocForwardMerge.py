@@ -1,4 +1,4 @@
-
+import re
 
 class ExtremelyCommentedLine:
     
@@ -11,6 +11,10 @@ class ExtremelyCommentedLine:
         
     def addExtremeComment(self, line):
         self.extremeComments.append(line)
+    
+    def __str__(self):
+        return "%sLINE: %s\n\n" % ("".join([" COMMENT: %s\n" % comment for comment in self.extremeComments]), 
+                             self.line)
         
 class ExtremelyCommentedLines:
     
@@ -22,6 +26,8 @@ class ExtremelyCommentedLines:
     def addLines(self, lines):
         nextLine = None
         for line in lines:
+            if line.endswith("\n"):
+                line = line[:-1]
             if nextLine == None:
                 nextLine = ExtremelyCommentedLine()
                 self.lines.append(nextLine)
@@ -33,4 +39,31 @@ class ExtremelyCommentedLines:
         if nextLine != None:
             if nextLine.line == None:
                 nextLine.setLine("")
+                
+    def __str__(self):
+        return "".join([str(line) for line in self.lines])
+                
+def readExtremelyCommentedLines(fileName, extremeCommentLineSelector):
+    inputFile = open(fileName, "r")
+    extremelyCommentedLines = ExtremelyCommentedLines(extremeCommentLineSelector)
+    extremelyCommentedLines.addLines(inputFile)
+    inputFile.close()
+    return extremelyCommentedLines
 
+pythonExtremeCommentRegex = re.compile("^\s*#[E|D]\s.*$")
+
+def pythonExtremeCommentsSelector(line):
+    return pythonExtremeCommentRegex.match(line)
+
+def main():
+    mainSourceFileName = "ExtremeDocHighlighting.py"
+    commentedSourceFileName = "ed/ExtremeDocHighlighting.py"
+    
+    mainSourceLines = readExtremelyCommentedLines(mainSourceFileName, pythonExtremeCommentsSelector)
+    commentedSourceLines = readExtremelyCommentedLines(commentedSourceFileName, pythonExtremeCommentsSelector)
+    
+    print("mainSourceLines = \n%s" % mainSourceLines)
+    print("commentedSourceLines = \n%s" % commentedSourceLines)
+    
+if __name__ == "__main__":
+    main()
