@@ -1,4 +1,5 @@
 import re
+import difflib
 
 class ExtremelyCommentedLine:
     
@@ -40,8 +41,21 @@ class ExtremelyCommentedLines:
             if nextLine.line == None:
                 nextLine.setLine("")
                 
+    def getUncommentedLines(self):
+        return [line.line for line in self.lines]
+                
     def __str__(self):
         return "".join([str(line) for line in self.lines])
+    
+    def mergeForwardTo(self, newSourceLines):
+        print("mergeForwardTo ...")
+        oldUncommentedLines = self.getUncommentedLines()
+        newUncommentedLines = newSourceLines.getUncommentedLines()
+        matcher = difflib.SequenceMatcher(None, oldUncommentedLines, newUncommentedLines)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            print("tag: %s" % tag)
+            print(" %s-%s, %s-%s" % (i1, i2, j1, j2))
+        
                 
 def readExtremelyCommentedLines(fileName, extremeCommentLineSelector):
     inputFile = open(fileName, "r")
@@ -50,7 +64,7 @@ def readExtremelyCommentedLines(fileName, extremeCommentLineSelector):
     inputFile.close()
     return extremelyCommentedLines
 
-pythonExtremeCommentRegex = re.compile("^\s*#[E|D]\s.*$")
+pythonExtremeCommentRegex = re.compile("^\s*#[EN]\s.*$")
 
 def pythonExtremeCommentsSelector(line):
     return pythonExtremeCommentRegex.match(line)
@@ -62,8 +76,10 @@ def main():
     mainSourceLines = readExtremelyCommentedLines(mainSourceFileName, pythonExtremeCommentsSelector)
     commentedSourceLines = readExtremelyCommentedLines(commentedSourceFileName, pythonExtremeCommentsSelector)
     
-    print("mainSourceLines = \n%s" % mainSourceLines)
-    print("commentedSourceLines = \n%s" % commentedSourceLines)
+    #print("mainSourceLines = \n%s" % mainSourceLines)
+    #print("commentedSourceLines = \n%s" % commentedSourceLines)
+    
+    commentedSourceLines.mergeForwardTo(mainSourceLines)
     
 if __name__ == "__main__":
     main()
