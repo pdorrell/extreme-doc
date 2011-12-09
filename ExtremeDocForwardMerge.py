@@ -14,6 +14,10 @@ class ExtremelyCommentedLine:
         self.extremeComments.append(line)
     
     def __str__(self):
+        return "%s%s" % ("".join(["%s\n" % comment for comment in self.extremeComments]), 
+                           self.line)
+    
+    def __repr__(self):
         return "%sLINE: %s\n\n" % ("".join([" COMMENT: %s\n" % comment for comment in self.extremeComments]), 
                              self.line)
         
@@ -59,22 +63,22 @@ class ExtremelyCommentedLines:
             if tag == "equal":
                 print ("##EQUAL")
                 for i in range(i1, i2):
-                    print ("%s" % oldUncommentedLines[i])
+                    print ("??%s" % self.lines[i])
             elif tag == "delete":
                 print ("##DELETE")
                 for i in range(i1, i2):
-                    print ("%s" % oldUncommentedLines[i])
+                    print ("%s" % self.lines[i])
             elif tag == "insert":
                 print ("##INSERT")
                 for i in range(j1, j2):
-                    print ("%s" % newUncommentedLines[i])
+                    print ("%s" % newSourceLines.lines[i])
             elif tag == "replace":
                 print ("##REPLACE")
                 for i in range(i1, i2):
-                    print ("%s" % oldUncommentedLines[i])
+                    print ("%s" % self.lines[i])
                 print ("#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
                 for i in range(j1, j2):
-                    print ("%s" % newUncommentedLines[i])
+                    print ("%s" % newSourceLines.lines[i])
                 
 def readExtremelyCommentedLines(fileName, extremeCommentLineSelector):
     inputFile = open(fileName, "r")
