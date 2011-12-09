@@ -53,9 +53,28 @@ class ExtremelyCommentedLines:
         newUncommentedLines = newSourceLines.getUncommentedLines()
         matcher = difflib.SequenceMatcher(None, oldUncommentedLines, newUncommentedLines)
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            print("tag: %s" % tag)
-            print(" %s-%s, %s-%s" % (i1, i2, j1, j2))
-        
+            #print("tag: %s" % tag)
+            #print(" %s-%s, %s-%s" % (i1, i2, j1, j2))
+            print ("####################################################################")
+            if tag == "equal":
+                print ("##EQUAL")
+                for i in range(i1, i2):
+                    print ("%d : %s" % (i, oldUncommentedLines[i]))
+            elif tag == "delete":
+                print ("##DELETE")
+                for i in range(i1, i2):
+                    print ("%d : %s" % (i, oldUncommentedLines[i]))
+            elif tag == "insert":
+                print ("##INSERT")
+                for i in range(j1, j2):
+                    print ("%d : %s" % (i, newUncommentedLines[i]))
+            elif tag == "replace":
+                print ("##REPLACE")
+                for i in range(i1, i2):
+                    print ("%d : %s" % (i, oldUncommentedLines[i]))
+                print ("#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+                for i in range(j1, j2):
+                    print ("%d : %s" % (i, newUncommentedLines[i]))
                 
 def readExtremelyCommentedLines(fileName, extremeCommentLineSelector):
     inputFile = open(fileName, "r")
