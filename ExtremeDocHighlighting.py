@@ -16,6 +16,7 @@ JSQUERY_URL = "http://ajax.googleapis.com/ajax/libs/jquery/%s/jquery.min.js" % J
 JSQUERY_FILENAME = "jquery.min.%s.js" % JSQUERY_VERSION
 JSQUERY_FILE_LOCATION = "js/%s" % JSQUERY_FILENAME
 
+#E A pygments filter which will relabel comments starting with "#N "/"#E " as being of type Token.Comment.Negative/Extreme
 class RelabelExtremeCommentsFilter(Filter):
     def filter (self, lexer, stream):
         for ttype, value in stream:
@@ -63,10 +64,12 @@ class HtmlPageFormatter(HtmlFormatter):
     
     def javascriptFiles(self):
         return [JSQUERY_FILE_LOCATION, "extreme-doc.js"]
-    
+
+    #E The HTML document type declaration    
     def htmlDocType(self):
         return "<!DOCTYPE html>"
     
+    #E HTML that goes at the end of the page
     def htmlEnd(self):
         return "</body></html>\n"
 
@@ -154,7 +157,9 @@ def downloadUrlToFile(url, fileName, clobberIfThere = False):
     
 def process(inputFileName, relativeBaseDir = ""):
     
+    #E the output file name is the input file name with ".html" on the end
     outputFileName = "%s.html" % inputFileName
+    #E use the Ruby lexer provided by Pygments to parse Ruby input files
     rubyLexer = RubyLexer()
     rubyLexer.add_filter(RelabelExtremeCommentsFilter())
     htmlPageFormatter = HtmlPageFormatter(title = inputFileName, relativeBaseDir = relativeBaseDir)

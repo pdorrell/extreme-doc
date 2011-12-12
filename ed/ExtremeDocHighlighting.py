@@ -80,7 +80,7 @@ class HtmlPageFormatter(HtmlFormatter):
     
     def htmlDocType(self):
         return "<!DOCTYPE html>"
-    
+
     def htmlEnd(self):
         return "</body></html>\n"
 

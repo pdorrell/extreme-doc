@@ -63,7 +63,15 @@ class ExtremelyCommentedLines:
             if tag == "equal":
                 print ("##EQUAL")
                 for i in range(i1, i2):
-                    print ("??%s" % self.lines[i])
+                    oldLine = self.lines[i]
+                    newSourceLine = newSourceLines.lines[i + (j1-i1)]
+                    for comment in oldLine.extremeComments:
+                        print("%s" % comment)
+                    if len(newSourceLine.extremeComments) > 0:
+                        print("#>>>")
+                        for comment in newSourceLine.extremeComments:
+                            print("%s" % comment)
+                    print(newSourceLine.line)
             elif tag == "delete":
                 print ("##DELETE")
                 for i in range(i1, i2):
