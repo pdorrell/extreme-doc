@@ -51,42 +51,40 @@ class ExtremelyCommentedLines:
     def __str__(self):
         return "".join([str(line) for line in self.lines])
     
-    def mergeForwardTo(self, newSourceLines):
-        print("mergeForwardTo ...")
+    blockHeaderTemplate = "## %s ###########################################################\n"
+    
+    def mergeForwardTo(self, newSourceLines, outFile):
         oldUncommentedLines = self.getUncommentedLines()
         newUncommentedLines = newSourceLines.getUncommentedLines()
         matcher = difflib.SequenceMatcher(None, oldUncommentedLines, newUncommentedLines)
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            #print("tag: %s" % tag)
-            #print(" %s-%s, %s-%s" % (i1, i2, j1, j2))
-            print ("####################################################################")
             if tag == "equal":
-                print ("##EQUAL")
+                outFile.write(ExtremelyCommentedLines.blockHeaderTemplate % "EQUAL")
                 for i in range(i1, i2):
                     oldLine = self.lines[i]
                     newSourceLine = newSourceLines.lines[i + (j1-i1)]
                     for comment in oldLine.extremeComments:
-                        print("%s" % comment)
+                        outFile.write("%s\n" % "%s" % comment)
                     if len(newSourceLine.extremeComments) > 0:
-                        print("#>>>")
+                        outFile.write("%s\n" % "#>>>")
                         for comment in newSourceLine.extremeComments:
-                            print("%s" % comment)
-                    print(newSourceLine.line)
+                            outFile.write("%s\n" % "%s" % comment)
+                    outFile.write("%s\n" % newSourceLine.line)
             elif tag == "delete":
-                print ("##DELETE")
+                outFile.write(ExtremelyCommentedLines.blockHeaderTemplate % "DELETE")
                 for i in range(i1, i2):
-                    print ("%s" % self.lines[i])
+                    outFile.write("%s\n" % "%s" % self.lines[i])
             elif tag == "insert":
-                print ("##INSERT")
+                outFile.write(ExtremelyCommentedLines.blockHeaderTemplate % "INSERT")
                 for i in range(j1, j2):
-                    print ("%s" % newSourceLines.lines[i])
+                    outFile.write("%s\n" % "%s" % newSourceLines.lines[i])
             elif tag == "replace":
-                print ("##REPLACE")
+                outFile.write(ExtremelyCommentedLines.blockHeaderTemplate % "REPLACE")
                 for i in range(i1, i2):
-                    print ("%s" % self.lines[i])
-                print ("#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+                    outFile.write("%s\n" % "%s" % self.lines[i])
+                outFile.write("%s\n" % "#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
                 for i in range(j1, j2):
-                    print ("%s" % newSourceLines.lines[i])
+                    outFile.write("%s\n" % "%s" % newSourceLines.lines[i])
                 
 def readExtremelyCommentedLines(fileName, extremeCommentLineSelector):
     inputFile = open(fileName, "r")
@@ -110,7 +108,11 @@ def main():
     #print("mainSourceLines = \n%s" % mainSourceLines)
     #print("commentedSourceLines = \n%s" % commentedSourceLines)
     
-    commentedSourceLines.mergeForwardTo(mainSourceLines)
+    with open(commentedSourceFileName, "w") as outFile:
+        commentedSourceLines.mergeForwardTo(mainSourceLines, outFile)
+        print(" updated %s from %s." % (commentedSourceFileName, mainSourceFileName))
+        
+        
     
 if __name__ == "__main__":
     main()
