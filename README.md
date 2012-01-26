@@ -6,5 +6,7 @@ as explained at [Extreme Negative Code Documentation].
 
 Work in progress:
 
-   - Merge tools to allow a version of code containing "extreme" comments to be maintained separately from the primary version of source code without the extreme comments.
+   - Forward and backward merge tools to allow a version of code containing "extreme" comments 
+     to be maintained separately from the primary version of source code without the extreme comments.
+
   [Extreme Negative Code Documentation]: http://www.1729.com/blog/ExtremeNegativeCodeDocumentation.html
